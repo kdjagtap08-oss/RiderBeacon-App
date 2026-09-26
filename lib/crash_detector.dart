@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
@@ -142,4 +143,35 @@ class CrashDetector extends ChangeNotifier {
     _windowTimer?.cancel();
     super.dispose();
   }
+}
+class TestingPanel extends StatelessWidget {
+  const TestingPanel({super.key, required this.d});
+  final CrashDetector d;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: d,
+        builder: (context, _) => Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+              color: const Color(0xFF181D25),
+              borderRadius: BorderRadius.circular(16)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.bug_report, size: 16, color: Colors.white54),
+              const SizedBox(width: 6),
+              const Text('Crash detector (debug)',
+                  style: TextStyle(fontSize: 12, color: Colors.white54)),
+              const Spacer(),
+              Text(d.state.name.toUpperCase(),
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            ]),
+            const SizedBox(height: 6),
+            Text(
+              'accel: ${d.lastAccelG.toStringAsFixed(2)}g   gyro: ${d.lastGyroMag.toStringAsFixed(0)}°/s',
+              style: const TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+          ]),
+        ),
+      );
 }

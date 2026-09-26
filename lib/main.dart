@@ -9,6 +9,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'crash_detector.dart';
+
 
 const kBg = Color(0xFF0E1116);
 const kCard = Color(0xFF181D25);
@@ -158,6 +160,7 @@ class _ShellState extends State<Shell> {
   final tracker = Tracker();
   final helmet = HelmetLink();
   final contacts = Contacts();
+  final crash = CrashDetector(); 
   int tab = 0;
 
   @override
@@ -165,6 +168,7 @@ class _ShellState extends State<Shell> {
     super.initState();
     tracker.start();
     contacts.load();
+    crash.start();
   }
 
   @override
@@ -172,6 +176,7 @@ class _ShellState extends State<Shell> {
     tracker.dispose();
     helmet.dispose();
     contacts.dispose();
+    crash.dispose();
     super.dispose();
   }
 
@@ -183,6 +188,7 @@ class _ShellState extends State<Shell> {
                 t: tracker,
                 h: helmet,
                 contacts: contacts,
+                crash: crash,
                 openHelmet: () => setState(() => tab = 1)),
             HelmetPage(h: helmet),
           ]),
@@ -222,11 +228,13 @@ class HomePage extends StatelessWidget {
       required this.t,
       required this.h,
       required this.contacts,
+      required this.crash, 
       required this.openHelmet});
   final Tracker t;
   final HelmetLink h;
   final Contacts contacts;
   final VoidCallback openHelmet;
+  final CrashDetector crash;
 
   /// Manual SOS: 1) get location, 2) SMS all contacts, 3) call first contact.
   Future<void> _sos(BuildContext c) async {
@@ -389,6 +397,8 @@ class HomePage extends StatelessWidget {
                 const SizedBox(height: 16),
                 GyroPanel(g: h.gyro),
                 const SizedBox(height: 20),
+                TestingPanel(d: crash),  
+                const SizedBox(height: 16),
             GestureDetector(
               onLongPress: () => _sos(context),
               child: Container(
