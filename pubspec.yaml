@@ -41,6 +41,7 @@ dependencies:
   another_telephony: ^0.4.1
   flutter_phone_direct_caller: ^2.2.1
   shared_preferences: ^2.5.5
+  sensors_plus: ^7.1.0
 
 dev_dependencies:
   flutter_test:
