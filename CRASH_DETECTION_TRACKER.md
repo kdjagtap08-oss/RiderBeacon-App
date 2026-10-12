@@ -9,8 +9,9 @@ This document tracks the step-by-step implementation of the SmartKavach Crash De
 | Phase | Description | Status | Completion Date |
 | :--- | :--- | :--- | :--- |
 | **Setup & Toolchain** | Homebrew tools, Flutter SDK, Android SDK, and Phone Debugging | **DONE** | Oct 12, 2026 |
-| **Phase 1** | Core Detection Engine & 15s Safety Countdown Modal | **NOT STARTED** | — |
-| **Phase 2** | In-App Sensor Simulator & Preset Testing Panel | **NOT STARTED** | — |
+| **Milestone 1** | Core Crash Detection Fusion Engine (`lib/crash_detector.dart`) | **DONE** | Oct 12, 2026 |
+| **Milestone 2** | 15s Safety Countdown Modal & Emergency Haptics | **IN PROGRESS** | — |
+| **Milestone 3** | In-App Simulation & Testing Panel (Highway crash, pothole presets) | **NOT STARTED** | — |
 | **Phase 3** | ESP32 Helmet Firmware (`smartkavach_helmet.ino`) | **NOT STARTED** | — |
 | **Phase 4A** | Baseline ML Model using Public Datasets | **NOT STARTED** | — |
 | **Phase 4B** | Empirical Synthetic Dataset & Fine-Tuned Model (Post-Hardware) | **QUEUED** | — |
@@ -29,11 +30,12 @@ This document tracks the step-by-step implementation of the SmartKavach Crash De
 ---
 
 ### Phase 1: Core Detection Engine & Safety Modal
-- [ ] Add `sensors_plus` to `pubspec.yaml` for phone accelerometer stream.
-- [ ] Implement multi-sensor fusion state machine in `lib/crash_detector.dart`:
-  - [ ] Stage 1: Impact detection ($g \ge 3.0g$ AND gyro $\ge 200^\circ/\text{s}$).
-  - [ ] Stage 2: Speed drop confirmation ($\Delta v \ge 15\text{ km/h}$ within 2 seconds).
-  - [ ] Stage 3: Post-impact stillness verification (3 seconds).
+- [x] Add `sensors_plus` to `pubspec.yaml` for phone accelerometer stream.
+- [x] Implement multi-sensor fusion state machine in `lib/crash_detector.dart`:
+  - [x] Stage 1: Impact detection ($g \ge 3.0g$ AND gyro $\ge 200^\circ/\text{s}$).
+  - [x] Stage 2: Speed drop confirmation ($\Delta v \ge 15\text{ km/h}$ within 2 seconds).
+  - [x] Stage 3: Post-impact stillness verification (3 seconds).
+- [x] Create automated unit tests in `test/crash_detector_test.dart` (6/6 passing).
 - [ ] Build the full-screen **"CRASH DETECTED!"** 15-second countdown modal with circular indicator.
 - [ ] Implement repeating emergency haptic feedback alarm during countdown.
 - [ ] Add **"I AM OK — CANCEL"** button with a 30-second disarm cooldown.
