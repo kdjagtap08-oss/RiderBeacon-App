@@ -10,8 +10,8 @@ This document tracks the step-by-step implementation of the SmartKavach Crash De
 | :--- | :--- | :--- | :--- |
 | **Setup & Toolchain** | Homebrew tools, Flutter SDK, Android SDK, and Phone Debugging | **DONE** | Oct 12, 2026 |
 | **Milestone 1** | Core Crash Detection Fusion Engine (`lib/crash_detector.dart`) | **DONE** | Oct 12, 2026 |
-| **Milestone 2** | 15s Safety Countdown Modal & Emergency Haptics | **IN PROGRESS** | — |
-| **Milestone 3** | In-App Simulation & Testing Panel (Highway crash, pothole presets) | **NOT STARTED** | — |
+| **Milestone 2** | 15s Safety Countdown Modal & Emergency Haptics | **DONE** | Oct 12, 2026 |
+| **Milestone 3** | In-App Simulation & Testing Panel (Highway crash, pothole presets) | **IN PROGRESS** | — |
 | **Phase 3** | ESP32 Helmet Firmware (`smartkavach_helmet.ino`) | **NOT STARTED** | — |
 | **Phase 4A** | Baseline ML Model using Public Datasets | **NOT STARTED** | — |
 | **Phase 4B** | Empirical Synthetic Dataset & Fine-Tuned Model (Post-Hardware) | **QUEUED** | — |
@@ -36,10 +36,11 @@ This document tracks the step-by-step implementation of the SmartKavach Crash De
   - [x] Stage 2: Speed drop confirmation ($\Delta v \ge 15\text{ km/h}$ within 2 seconds).
   - [x] Stage 3: Post-impact stillness verification (3 seconds).
 - [x] Create automated unit tests in `test/crash_detector_test.dart` (6/6 passing).
-- [ ] Build the full-screen **"CRASH DETECTED!"** 15-second countdown modal with circular indicator.
-- [ ] Implement repeating emergency haptic feedback alarm during countdown.
-- [ ] Add **"I AM OK — CANCEL"** button with a 30-second disarm cooldown.
-- [ ] Connect countdown expiration to automated SOS trigger (silent SMS + auto-dial).
+- [x] Build the full-screen **"CRASH DETECTED!"** 15-second countdown modal with circular indicator (`lib/crash_countdown_dialog.dart`).
+- [x] Implement repeating emergency haptic feedback alarm during countdown.
+- [x] Add **"I AM OK — CANCEL"** button with a 30-second disarm cooldown.
+- [x] Connect countdown expiration to automated SOS trigger (silent SMS + auto-dial).
+- [x] Create widget tests in `test/crash_countdown_dialog_test.dart` (4/4 passing).
 
 ---
 

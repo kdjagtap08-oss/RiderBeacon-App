@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'gyro.dart';
+import 'crash_detector.dart';
+import 'crash_countdown_dialog.dart';
 import 'package:another_telephony/telephony.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -121,7 +123,7 @@ class HelmetLink extends ChangeNotifier {
       notifyListeners();
     });
     try {
-      await d.connect(license: License.free, timeout: const Duration(seconds: 10));
+      await d.connect(license: License.nonprofit, timeout: const Duration(seconds: 10));
       await gyro.attach(d);
     } catch (_) {
       device = null;
@@ -158,6 +160,8 @@ class _ShellState extends State<Shell> {
   final tracker = Tracker();
   final helmet = HelmetLink();
   final contacts = Contacts();
+  final crashDetector = CrashDetector();
+  bool _isShowingCountdown = false;
   int tab = 0;
 
   @override
@@ -165,13 +169,68 @@ class _ShellState extends State<Shell> {
     super.initState();
     tracker.start();
     contacts.load();
+    crashDetector.startHardwareFeed();
+
+    tracker.addListener(_onTrackerUpdate);
+    helmet.gyro.addListener(_onGyroUpdate);
+    crashDetector.addListener(_onCrashUpdate);
+  }
+
+  void _onTrackerUpdate() {
+    crashDetector.feedGpsSpeed(tracker.speed);
+  }
+
+  void _onGyroUpdate() {
+    final v = helmet.gyro.values;
+    if (v != null && v.length == 3) {
+      crashDetector.feedHelmetGyro(v[0], v[1], v[2]);
+    }
+  }
+
+  void _onCrashUpdate() {
+    if (crashDetector.state == CrashState.alertTriggered && !_isShowingCountdown) {
+      _showCountdownDialog();
+    }
+  }
+
+  Future<void> _showCountdownDialog() async {
+    _isShowingCountdown = true;
+    if (!mounted) return;
+
+    await showGeneralDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierLabel: 'Crash Alert',
+      pageBuilder: (dialogContext, anim1, anim2) => CrashCountdownDialog(
+        totalSeconds: 15,
+        onCancel: () {
+          crashDetector.acknowledge();
+          Navigator.of(dialogContext, rootNavigator: true).pop();
+        },
+        onTimeout: () {
+          Navigator.of(dialogContext, rootNavigator: true).pop();
+          sendSosAlert(
+            context: context,
+            tracker: tracker,
+            contacts: contacts,
+            isAutoCrashTrigger: true,
+          );
+        },
+      ),
+    );
+    _isShowingCountdown = false;
   }
 
   @override
   void dispose() {
+    tracker.removeListener(_onTrackerUpdate);
+    helmet.gyro.removeListener(_onGyroUpdate);
+    crashDetector.removeListener(_onCrashUpdate);
+
     tracker.dispose();
     helmet.dispose();
     contacts.dispose();
+    crashDetector.dispose();
     super.dispose();
   }
 
@@ -183,6 +242,7 @@ class _ShellState extends State<Shell> {
                 t: tracker,
                 h: helmet,
                 contacts: contacts,
+                crash: crashDetector,
                 openHelmet: () => setState(() => tab = 1)),
             HelmetPage(h: helmet),
           ]),
@@ -214,6 +274,56 @@ class Panel extends StatelessWidget {
       );
 }
 
+/// Centralized SOS dispatch (shared by manual button and automated crash trigger).
+Future<void> sendSosAlert({
+  required BuildContext context,
+  required Tracker tracker,
+  required Contacts contacts,
+  bool isAutoCrashTrigger = false,
+}) async {
+  HapticFeedback.heavyImpact();
+  final msg = ScaffoldMessenger.of(context);
+  if (contacts.numbers.isEmpty) {
+    msg.showSnackBar(const SnackBar(
+        content: Text('Add an emergency contact in SOS settings first')));
+    return;
+  }
+
+  // 1) Location: last GPS fix, or try to get a fresh one.
+  LatLng? here = tracker.pos;
+  if (here == null) {
+    try {
+      final p = await Geolocator.getCurrentPosition(
+          locationSettings:
+              const LocationSettings(timeLimit: Duration(seconds: 8)));
+      here = LatLng(p.latitude, p.longitude);
+    } catch (_) {}
+  }
+  final where = here == null
+      ? 'Location unavailable.'
+      : 'https://maps.google.com/?q=${here.latitude.toStringAsFixed(5)},${here.longitude.toStringAsFixed(5)}';
+  final prefix = isAutoCrashTrigger ? 'CRASH DETECTED!' : 'SOS!';
+  final text = '$prefix I need help. My location: $where';
+
+  // 2) SMS to every contact
+  final sms = Telephony.instance;
+  if (await sms.requestSmsPermissions ?? false) {
+    for (final n in contacts.numbers) {
+      try {
+        await sms.sendSms(to: n, message: text);
+      } catch (_) {}
+    }
+    msg.showSnackBar(SnackBar(
+        content: Text('SOS sent to ${contacts.numbers.length} contact(s)')));
+  } else {
+    msg.showSnackBar(
+        const SnackBar(content: Text('SMS permission denied, calling only')));
+  }
+
+  // 3) Call the first contact.
+  await FlutterPhoneDirectCaller.callNumber(contacts.numbers.first);
+}
+
 // ───────────────────────── Ride tab ─────────────────────────
 
 class HomePage extends StatelessWidget {
@@ -222,55 +332,13 @@ class HomePage extends StatelessWidget {
       required this.t,
       required this.h,
       required this.contacts,
+      required this.crash,
       required this.openHelmet});
   final Tracker t;
   final HelmetLink h;
   final Contacts contacts;
+  final CrashDetector crash;
   final VoidCallback openHelmet;
-
-  /// Manual SOS: 1) get location, 2) SMS all contacts, 3) call first contact.
-  Future<void> _sos(BuildContext c) async {
-    HapticFeedback.heavyImpact();
-    final msg = ScaffoldMessenger.of(c);
-    if (contacts.numbers.isEmpty) {
-      msg.showSnackBar(const SnackBar(
-          content: Text('Add an emergency contact in SOS settings first')));
-      return;
-    }
-
-    // 1) Location: last GPS fix, or try to get a fresh one.
-    LatLng? here = t.pos;
-    if (here == null) {
-      try {
-        final p = await Geolocator.getCurrentPosition(
-            locationSettings:
-                const LocationSettings(timeLimit: Duration(seconds: 8)));
-        here = LatLng(p.latitude, p.longitude);
-      } catch (_) {}
-    }
-        final where = here == null
-        ? 'Location unavailable.'
-        : 'My location: ${here.latitude.toStringAsFixed(5)}, ${here.longitude.toStringAsFixed(5)}';
-    final text = 'SOS! I need help. $where';
-
-    // 2) SMS to every contact (sent silently, no messaging app opens).
-    final sms = Telephony.instance;
-    if (await sms.requestSmsPermissions ?? false) {
-      for (final n in contacts.numbers) {
-        try {
-          await sms.sendSms(to: n, message: text);
-        } catch (_) {}
-      }
-      msg.showSnackBar(SnackBar(
-          content: Text('SOS sent to ${contacts.numbers.length} contact(s)')));
-    } else {
-      msg.showSnackBar(
-          const SnackBar(content: Text('SMS permission denied, calling only')));
-    }
-
-    // 3) Call the first contact.
-    await FlutterPhoneDirectCaller.callNumber(contacts.numbers.first);
-  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -390,7 +458,11 @@ class HomePage extends StatelessWidget {
                 GyroPanel(g: h.gyro),
                 const SizedBox(height: 20),
             GestureDetector(
-              onLongPress: () => _sos(context),
+              onLongPress: () => sendSosAlert(
+                context: context,
+                tracker: t,
+                contacts: contacts,
+              ),
               child: Container(
                 height: 76,
                 alignment: Alignment.center,
@@ -398,7 +470,7 @@ class HomePage extends StatelessWidget {
                   color: kSos,
                   borderRadius: BorderRadius.circular(38),
                   boxShadow: [
-                    BoxShadow(color: kSos.withOpacity(0.4), blurRadius: 24)
+                    BoxShadow(color: kSos.withValues(alpha: 0.4), blurRadius: 24)
                   ],
                 ),
                 child: const Row(mainAxisSize: MainAxisSize.min, children: [
@@ -444,7 +516,7 @@ class HelmetPage extends StatelessWidget {
                   CircleAvatar(
                     radius: 36,
                     backgroundColor:
-                        (h.connected ? kGood : Colors.white24).withOpacity(0.2),
+                        (h.connected ? kGood : Colors.white24).withValues(alpha: 0.2),
                     child: Icon(Icons.sports_motorsports,
                         size: 36, color: h.connected ? kGood : Colors.white54),
                   ),
