@@ -27,15 +27,17 @@ class _SimulationPanelState extends State<SimulationPanel> {
   double _sliderGyro = 0.0;
 
   /// Simulates a severe motorcycle highway crash scenario.
+  /// Simulates a severe motorcycle highway crash scenario.
   Future<void> _simulateHighwayCrash() async {
     if (_isSimulating) return;
     setState(() => _isSimulating = true);
 
     final d = widget.detector;
     d.reset();
+    d.isSimulationActive = true;
 
     // 1. Cruising speed at 70 km/h
-    d.feedGpsSpeed(70.0);
+    d.feedGpsSpeed(70.0, isSimulated: true);
     d.feedHelmetGyro(10.0, 5.0, 10.0);
     d.feedAccelerometer(0.0, 0.0, 9.81);
     await Future.delayed(const Duration(milliseconds: 300));
@@ -46,7 +48,7 @@ class _SimulationPanelState extends State<SimulationPanel> {
     await Future.delayed(const Duration(milliseconds: 300));
 
     // 3. Speed drops to 0 km/h
-    d.feedGpsSpeed(0.0);
+    d.feedGpsSpeed(0.0, isSimulated: true);
 
     // 4. Wait for speed drop check window (2.1s)
     await Future.delayed(const Duration(milliseconds: 2100));
@@ -54,7 +56,9 @@ class _SimulationPanelState extends State<SimulationPanel> {
     // 5. Rider remains motionless during stillness window (3.1s)
     d.feedHelmetGyro(1.0, 1.0, 1.0);
     d.feedAccelerometer(0.0, 0.0, 9.81); // 1.0g
+    await Future.delayed(const Duration(milliseconds: 3100));
 
+    d.isSimulationActive = false;
     if (mounted) {
       setState(() => _isSimulating = false);
     }
@@ -66,9 +70,10 @@ class _SimulationPanelState extends State<SimulationPanel> {
     setState(() => _isSimulating = true);
 
     final d = widget.detector;
+    d.isSimulationActive = true;
 
     // Riding at 50 km/h
-    d.feedGpsSpeed(50.0);
+    d.feedGpsSpeed(50.0, isSimulated: true);
     d.feedHelmetGyro(2.0, 1.0, 2.0); // Minimal helmet rotation (3 deg/s)
 
     // Vertical g-force spike: 35 m/s^2 (~3.57g)
@@ -77,7 +82,8 @@ class _SimulationPanelState extends State<SimulationPanel> {
 
     // Returns to normal riding
     d.feedAccelerometer(0.0, 0.0, 9.81);
-    d.feedGpsSpeed(50.0);
+    d.feedGpsSpeed(50.0, isSimulated: true);
+    d.isSimulationActive = false;
 
     if (mounted) {
       setState(() => _isSimulating = false);
@@ -96,9 +102,10 @@ class _SimulationPanelState extends State<SimulationPanel> {
     setState(() => _isSimulating = true);
 
     final d = widget.detector;
+    d.isSimulationActive = true;
 
     // Stationary (speed = 0)
-    d.feedGpsSpeed(0.0);
+    d.feedGpsSpeed(0.0, isSimulated: true);
     d.feedHelmetGyro(0.0, 0.0, 0.0); // Helmet not rotating
 
     // High impact shock on phone: 36 m/s^2 (~3.67g)
@@ -106,6 +113,7 @@ class _SimulationPanelState extends State<SimulationPanel> {
     await Future.delayed(const Duration(milliseconds: 400));
 
     d.feedAccelerometer(0.0, 0.0, 9.81);
+    d.isSimulationActive = false;
 
     if (mounted) {
       setState(() => _isSimulating = false);
@@ -156,25 +164,28 @@ class _SimulationPanelState extends State<SimulationPanel> {
               onTap: () => setState(() => _isExpanded = !_isExpanded),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 16.0, vertical: 14.0),
+                    horizontal: 14.0, vertical: 14.0),
                 child: Row(
                   children: [
                     const Icon(Icons.science_outlined,
-                        color: kAccentOrange, size: 22),
-                    const SizedBox(width: 10),
-                    const Text(
-                      'Crash Simulator & Diagnostics',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                        color: Colors.white,
+                        color: kAccentOrange, size: 20),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Crash Simulator & Diagnostics',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 6),
                     // Engine State Badge
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
+                          horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(
                         color: _stateColor(d.state).withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(8),
@@ -182,18 +193,19 @@ class _SimulationPanelState extends State<SimulationPanel> {
                       child: Text(
                         d.state.name.toUpperCase(),
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: 10,
                           fontWeight: FontWeight.w800,
                           color: _stateColor(d.state),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 4),
                     Icon(
                       _isExpanded
                           ? Icons.keyboard_arrow_up
                           : Icons.keyboard_arrow_down,
                       color: Colors.white54,
+                      size: 20,
                     ),
                   ],
                 ),
@@ -239,6 +251,22 @@ class _SimulationPanelState extends State<SimulationPanel> {
                       ),
                     ),
                     const SizedBox(height: 10),
+                    // Instant Alert Button
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () => d.triggerSimulatedAlert(),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: kAccentOrange,
+                          padding: const EdgeInsets.symmetric(vertical: 11),
+                        ),
+                        icon: const Icon(Icons.notifications_active, size: 18),
+                        label: const Text('🚨 Instant Test Alert Modal',
+                            style: TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     Row(
                       children: [
                         Expanded(
@@ -250,8 +278,8 @@ class _SimulationPanelState extends State<SimulationPanel> {
                               padding: const EdgeInsets.symmetric(vertical: 10),
                             ),
                             icon: const Icon(Icons.car_crash, size: 18),
-                            label: const Text('Crash Preset',
-                                style: TextStyle(fontSize: 12)),
+                            label: Text(_isSimulating ? 'Simulating...' : 'Crash Preset',
+                                style: const TextStyle(fontSize: 12)),
                           ),
                         ),
                         const SizedBox(width: 8),

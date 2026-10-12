@@ -3,6 +3,7 @@ import 'gyro.dart';
 import 'crash_detector.dart';
 import 'crash_countdown_dialog.dart';
 import 'simulation_panel.dart';
+import 'incident_feedback_sheet.dart';
 import 'package:another_telephony/telephony.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -190,7 +191,13 @@ class _ShellState extends State<Shell> {
 
   void _onCrashUpdate() {
     if (crashDetector.state == CrashState.alertTriggered && !_isShowingCountdown) {
-      _showCountdownDialog();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted &&
+            crashDetector.state == CrashState.alertTriggered &&
+            !_isShowingCountdown) {
+          _showCountdownDialog();
+        }
+      });
     }
   }
 
@@ -207,6 +214,7 @@ class _ShellState extends State<Shell> {
         onCancel: () {
           crashDetector.acknowledge();
           Navigator.of(dialogContext, rootNavigator: true).pop();
+          _showFeedbackSheet();
         },
         onTimeout: () {
           Navigator.of(dialogContext, rootNavigator: true).pop();
@@ -220,6 +228,49 @@ class _ShellState extends State<Shell> {
       ),
     );
     _isShowingCountdown = false;
+  }
+
+  void _showFeedbackSheet() {
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (bottomSheetContext) => IncidentFeedbackSheet(
+        onFeedbackSelected: (reason) {
+          final label = switch (reason) {
+            IncidentReason.pothole => 'Feedback logged: Road bump / pothole',
+            IncidentReason.droppedPhone => 'Feedback logged: Phone dropped / mount loose',
+            IncidentReason.minorFallSafe => 'Feedback logged: Minor fall (unhurt)',
+            IncidentReason.otherFalseAlarm => 'Feedback logged: False alarm',
+            IncidentReason.dismissed => 'Resumed ride',
+          };
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(label), duration: const Duration(seconds: 2)),
+          );
+        },
+        onSendReassuranceText: _sendReassuranceMessage,
+      ),
+    );
+  }
+
+  Future<void> _sendReassuranceMessage() async {
+    final msg = ScaffoldMessenger.of(context);
+    if (contacts.numbers.isEmpty) return;
+
+    final sms = Telephony.instance;
+    const text =
+        "SmartKavach Update: I had a minor slide with my bike, but I am completely unhurt and safe! No assistance needed.";
+    if (await sms.requestSmsPermissions ?? false) {
+      for (final n in contacts.numbers) {
+        try {
+          await sms.sendSms(to: n, message: text);
+        } catch (_) {}
+      }
+      msg.showSnackBar(
+        const SnackBar(content: Text("'I'm Safe' reassurance text sent to contacts")),
+      );
+    }
   }
 
   @override

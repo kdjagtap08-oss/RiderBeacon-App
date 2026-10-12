@@ -12,8 +12,8 @@ This document tracks the step-by-step implementation of the SmartKavach Crash De
 | **Milestone 1** | Core Crash Detection Fusion Engine (`lib/crash_detector.dart`) | **DONE** | Oct 12, 2026 |
 | **Milestone 2** | 15s Safety Countdown Modal & Emergency Haptics | **DONE** | Oct 12, 2026 |
 | **Milestone 3** | In-App Simulation & Testing Panel (Highway crash, pothole presets) | **DONE** | Oct 12, 2026 |
-| **Milestone 4** | Automated SOS Dispatch Integration (GPS coords, silent SMS, direct calling) | **IN PROGRESS** | — |
-| **Phase 4A** | Baseline ML Model using Public Datasets | **NOT STARTED** | — |
+| **Milestone 4** | Automated SOS & Post-Incident Feedback Sheet (`IncidentFeedbackSheet`) | **DONE** | Oct 12, 2026 |
+| **Milestone 5** | ESP32 Helmet Firmware (`smartkavach_helmet.ino`) | **IN PROGRESS** | — |
 | **Phase 4B** | Empirical Synthetic Dataset & Fine-Tuned Model (Post-Hardware) | **QUEUED** | — |
 | **Phase 5** | Background Foreground Service & Offline Incident Logs | **NOT STARTED** | — |
 
@@ -39,8 +39,10 @@ This document tracks the step-by-step implementation of the SmartKavach Crash De
 - [x] Build the full-screen **"CRASH DETECTED!"** 15-second countdown modal with circular indicator (`lib/crash_countdown_dialog.dart`).
 - [x] Implement repeating emergency haptic feedback alarm during countdown.
 - [x] Add **"I AM OK — CANCEL"** button with a 30-second disarm cooldown.
+- [x] Build post-incident feedback modal (`lib/incident_feedback_sheet.dart`) for classifying why alarm triggered (Pothole, Dropped phone, Minor fall, Other).
+- [x] Add one-tap "Send 'I'm Safe' SMS" reassurance message to emergency contacts when minor fall is selected.
 - [x] Connect countdown expiration to automated SOS trigger (silent SMS + auto-dial).
-- [x] Create widget tests in `test/crash_countdown_dialog_test.dart` (4/4 passing).
+- [x] Create widget tests in `test/crash_countdown_dialog_test.dart` (4/4 passing) and `test/incident_feedback_sheet_test.dart` (3/3 passing).
 
 ---
 

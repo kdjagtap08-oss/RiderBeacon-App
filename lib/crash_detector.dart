@@ -67,6 +67,17 @@ class CrashDetector extends ChangeNotifier {
   bool _isLiveHardwareEnabled = false;
   bool get isLiveHardwareEnabled => _isLiveHardwareEnabled;
 
+  /// When true, physical phone sensor noise and stationary GPS do not override simulation.
+  bool isSimulationActive = false;
+
+  /// Immediately triggers the alert state for direct UI/countdown testing.
+  void triggerSimulatedAlert() {
+    _cancelAllTimers();
+    _isCoolingDown = false;
+    _state = CrashState.alertTriggered;
+    _notifyThrottled(immediate: true);
+  }
+
   /// Starts listening to phone hardware sensors (if enabled).
   void startHardwareFeed() {
     if (_isLiveHardwareEnabled) return;
@@ -75,6 +86,7 @@ class CrashDetector extends ChangeNotifier {
     _accelSub = accelerometerEventStream(
       samplingPeriod: SensorInterval.gameInterval,
     ).listen((event) {
+      if (isSimulationActive) return;
       feedAccelerometer(event.x, event.y, event.z);
     });
   }
@@ -86,6 +98,16 @@ class CrashDetector extends ChangeNotifier {
     _isLiveHardwareEnabled = false;
   }
 
+  DateTime _lastUiNotify = DateTime.fromMillisecondsSinceEpoch(0);
+
+  void _notifyThrottled({bool immediate = false}) {
+    final now = DateTime.now();
+    if (immediate || now.difference(_lastUiNotify).inMilliseconds >= 120) {
+      _lastUiNotify = now;
+      notifyListeners();
+    }
+  }
+
   /// Feed linear accelerometer data in m/s^2 (from phone or simulator).
   void feedAccelerometer(double ax, double ay, double az) {
     // Convert m/s^2 to g-force magnitude (Earth gravity = 9.80665 m/s^2)
@@ -93,24 +115,27 @@ class CrashDetector extends ChangeNotifier {
     _lastAccelG = g;
 
     if (_isCoolingDown) {
-      notifyListeners();
+      _notifyThrottled();
       return;
     }
 
+    final prevState = _state;
     _evaluateMotion(g);
-    notifyListeners();
+    // If state transitioned (e.g. idle -> impactSeen -> confirming), notify immediately
+    _notifyThrottled(immediate: _state != prevState);
   }
 
   /// Feed helmet gyroscope data in deg/sec (from BLE or simulator).
   void feedHelmetGyro(double gx, double gy, double gz) {
     _lastGyroMag = sqrt(gx * gx + gy * gy + gz * gz);
-    notifyListeners();
+    _notifyThrottled();
   }
 
   /// Feed live GPS speed in km/h (from phone GPS Tracker or simulator).
-  void feedGpsSpeed(double kmh) {
+  void feedGpsSpeed(double kmh, {bool isSimulated = false}) {
+    if (isSimulationActive && !isSimulated) return;
     _currentSpeedKmh = kmh < 0 ? 0 : kmh;
-    notifyListeners();
+    _notifyThrottled();
   }
 
   void _evaluateMotion(double currentG) {
