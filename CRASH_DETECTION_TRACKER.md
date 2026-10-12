@@ -13,7 +13,8 @@ This document tracks the step-by-step implementation of the SmartKavach Crash De
 | **Milestone 2** | 15s Safety Countdown Modal & Emergency Haptics | **DONE** | Oct 12, 2026 |
 | **Milestone 3** | In-App Simulation & Testing Panel (Highway crash, pothole presets) | **DONE** | Oct 12, 2026 |
 | **Milestone 4** | Automated SOS & Post-Incident Feedback Sheet (`IncidentFeedbackSheet`) | **DONE** | Oct 12, 2026 |
-| **Milestone 5** | ESP32 Helmet Firmware (`smartkavach_helmet.ino`) | **IN PROGRESS** | — |
+| **Milestone 5** | ESP32 Helmet Firmware (`smartkavach_helmet.ino`) | **DONE** | Oct 12, 2026 |
+| **Milestone 6** | Stage 4A Baseline ML Model (Public Datasets & TFLite Pipeline) | **IN PROGRESS** | — |
 | **Phase 4B** | Empirical Synthetic Dataset & Fine-Tuned Model (Post-Hardware) | **QUEUED** | — |
 | **Phase 5** | Background Foreground Service & Offline Incident Logs | **NOT STARTED** | — |
 
@@ -58,10 +59,10 @@ This document tracks the step-by-step implementation of the SmartKavach Crash De
 ---
 
 ### Phase 3: ESP32 Helmet Firmware
-- [ ] Create `smartkavach_helmet/smartkavach_helmet.ino`.
-- [ ] Implement MPU6050 I2C sensor reading with startup zero-offset calibration.
-- [ ] Configure BLE GATT server with Service UUID `4fafc201-1fb5-459e-8fcc-c5c9c331914b` and Gyro UUID `beb5483e-36e1-4688-b7f5-ea07361b26a8`.
-- [ ] Implement CSV formatting (`x,y,z\n`) streaming at 25 Hz.
+- [x] Create `smartkavach_helmet/smartkavach_helmet.ino`.
+- [x] Implement MPU6050 I2C sensor reading with startup zero-offset calibration.
+- [x] Configure BLE GATT server with Service UUID `4fafc201-1fb5-459e-8fcc-c5c9c331914b` and Gyro UUID `beb5483e-36e1-4688-b7f5-ea07361b26a8`.
+- [x] Implement CSV formatting (`x,y,z\n`) streaming at 25 Hz.
 
 ---
 
