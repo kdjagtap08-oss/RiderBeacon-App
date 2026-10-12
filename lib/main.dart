@@ -7,6 +7,7 @@ import 'incident_feedback_sheet.dart';
 import 'incident_log_service.dart';
 import 'incident_log_sheet.dart';
 import 'foreground_service_manager.dart';
+import 'ml_crash_classifier.dart';
 import 'package:another_telephony/telephony.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -211,6 +212,16 @@ class _ShellState extends State<Shell> {
     _isShowingCountdown = true;
     if (!mounted) return;
 
+    final mlLabel = crashDetector.lastMlPrediction != null
+        ? switch (crashDetector.lastMlPrediction!) {
+            RideEventClass.normalRiding => 'Normal Riding',
+            RideEventClass.pothole => 'Road Shock / Pothole',
+            RideEventClass.droppedPhone => 'Dropped Phone',
+            RideEventClass.severeCrash => 'Severe Motorcycle Crash',
+          }
+        : 'Severe Motorcycle Crash (Physics Gate)';
+    final mlConf = crashDetector.lastMlConfidence ?? 0.99;
+
     // Log the initial crash detection incident to offline storage
     IncidentLogService.logIncident(IncidentRecord(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -221,6 +232,8 @@ class _ShellState extends State<Shell> {
       speedKmh: tracker.speed,
       maxImpactG: crashDetector.lastAccelG,
       maxGyroDps: crashDetector.lastGyroMag,
+      mlPrediction: mlLabel,
+      mlConfidence: mlConf,
     ));
 
     await showGeneralDialog(
@@ -245,6 +258,8 @@ class _ShellState extends State<Shell> {
             speedKmh: tracker.speed,
             maxImpactG: crashDetector.lastAccelG,
             maxGyroDps: crashDetector.lastGyroMag,
+            mlPrediction: mlLabel,
+            mlConfidence: mlConf,
           ));
           Navigator.of(dialogContext, rootNavigator: true).pop();
           sendSosAlert(

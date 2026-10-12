@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'crash_detector.dart';
+import 'ml_crash_classifier.dart';
 
 const kAccentOrange = Color(0xFFFF6B2C);
 const kCardBg = Color(0xFF181D25);
@@ -84,6 +85,7 @@ class _SimulationPanelState extends State<SimulationPanel> {
     d.feedAccelerometer(0.0, 0.0, 9.81);
     d.feedGpsSpeed(50.0, isSimulated: true);
     d.isSimulationActive = false;
+    d.runMlInference();
 
     if (mounted) {
       setState(() => _isSimulating = false);
@@ -114,6 +116,7 @@ class _SimulationPanelState extends State<SimulationPanel> {
 
     d.feedAccelerometer(0.0, 0.0, 9.81);
     d.isSimulationActive = false;
+    d.runMlInference();
 
     if (mounted) {
       setState(() => _isSimulating = false);
@@ -123,6 +126,19 @@ class _SimulationPanelState extends State<SimulationPanel> {
           duration: Duration(seconds: 2),
         ),
       );
+    }
+  }
+
+  String _mlLabel(RideEventClass c) {
+    switch (c) {
+      case RideEventClass.normalRiding:
+        return 'Normal Riding';
+      case RideEventClass.pothole:
+        return 'Pothole';
+      case RideEventClass.droppedPhone:
+        return 'Dropped Phone';
+      case RideEventClass.severeCrash:
+        return 'Severe Crash';
     }
   }
 
@@ -329,6 +345,29 @@ class _SimulationPanelState extends State<SimulationPanel> {
                         ),
                       ],
                     ),
+                    if (d.lastMlPrediction != null) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.psychology_outlined, size: 16, color: kAccentOrange),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'ML Inference: ${_mlLabel(d.lastMlPrediction!)} (${((d.lastMlConfidence ?? 1.0) * 100).toStringAsFixed(0)}% confidence)',
+                                style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 16),
 
                     const Text(

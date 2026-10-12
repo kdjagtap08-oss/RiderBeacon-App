@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:sensors_plus/sensors_plus.dart';
+import 'ml_crash_classifier.dart';
 
 /// Lifecycle states of the crash detection engine.
 enum CrashState {
@@ -25,6 +26,7 @@ enum CrashState {
 /// 1. Phone 3-axis Accelerometer (via sensors_plus or mock input) -> G-force
 /// 2. Helmet 3-axis Gyroscope (via BLE stream or mock input) -> deg/sec
 /// 3. Phone GPS Speed (via Tracker or mock input) -> km/h
+/// 4. Embedded ML Neural Inference (via MlCrashClassifier)
 class CrashDetector extends ChangeNotifier {
   // ---- Tunable Threshold Constants ----
   static const double kImpactG = 3.0; // Minimum impact threshold (in g's)
@@ -47,6 +49,8 @@ class CrashDetector extends ChangeNotifier {
   double _lastGyroMag = 0.0;
   double get lastGyroMag => _lastGyroMag;
 
+  double _lastGx = 0.0, _lastGy = 0.0, _lastGz = 0.0;
+
   double _currentSpeedKmh = 0.0;
   double get currentSpeedKmh => _currentSpeedKmh;
 
@@ -58,6 +62,14 @@ class CrashDetector extends ChangeNotifier {
 
   bool _isCoolingDown = false;
   bool get isCoolingDown => _isCoolingDown;
+
+  // ---- ML Inference & Sliding Telematics Window ----
+  final List<List<double>> _rollingWindow = [];
+  List<List<double>> get rollingWindow => List.unmodifiable(_rollingWindow);
+
+  RideEventClass? lastMlPrediction;
+  double? lastMlConfidence;
+  Map<RideEventClass, double>? lastMlProbabilities;
 
   StreamSubscription<AccelerometerEvent>? _accelSub;
   Timer? _speedCheckTimer;
@@ -74,6 +86,7 @@ class CrashDetector extends ChangeNotifier {
   void triggerSimulatedAlert() {
     _cancelAllTimers();
     _isCoolingDown = false;
+    runMlInference();
     _state = CrashState.alertTriggered;
     _notifyThrottled(immediate: true);
   }
@@ -114,6 +127,12 @@ class CrashDetector extends ChangeNotifier {
     final g = sqrt(ax * ax + ay * ay + az * az) / 9.80665;
     _lastAccelG = g;
 
+    // Record sample into rolling ML telematics window (50 samples = 2.5s)
+    _rollingWindow.add([ax, ay, az, _lastGx, _lastGy, _lastGz, _currentSpeedKmh]);
+    if (_rollingWindow.length > 50) {
+      _rollingWindow.removeAt(0);
+    }
+
     if (_isCoolingDown) {
       _notifyThrottled();
       return;
@@ -127,8 +146,37 @@ class CrashDetector extends ChangeNotifier {
 
   /// Feed helmet gyroscope data in deg/sec (from BLE or simulator).
   void feedHelmetGyro(double gx, double gy, double gz) {
+    _lastGx = gx;
+    _lastGy = gy;
+    _lastGz = gz;
     _lastGyroMag = sqrt(gx * gx + gy * gy + gz * gz);
     _notifyThrottled();
+  }
+
+  /// Returns a full 50x7 window padded if fewer samples have been collected.
+  List<List<double>> getPaddedWindow() {
+    if (_rollingWindow.isEmpty) {
+      return List.generate(
+        50,
+        (_) => [0.0, 0.0, 9.80665, 0.0, 0.0, 0.0, _currentSpeedKmh],
+      );
+    }
+    final window = List<List<double>>.from(_rollingWindow);
+    while (window.length < 50) {
+      window.insert(0, window.first);
+    }
+    return window;
+  }
+
+  /// Evaluates current sliding telematics window with embedded neural classifier.
+  RideEventClass runMlInference() {
+    final window = getPaddedWindow();
+    final probs = MlCrashClassifier.predictProbabilities(window);
+    final top = MlCrashClassifier.predict(window);
+    lastMlProbabilities = probs;
+    lastMlPrediction = top;
+    lastMlConfidence = probs[top];
+    return top;
   }
 
   /// Feed live GPS speed in km/h (from phone GPS Tracker or simulator).
@@ -194,6 +242,7 @@ class CrashDetector extends ChangeNotifier {
     _stillnessTimer?.cancel();
     _stillnessTimer = Timer(kStillnessDuration, () {
       if (_state == CrashState.confirming) {
+        runMlInference();
         _state = CrashState.alertTriggered;
         notifyListeners();
       }
