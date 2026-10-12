@@ -4,6 +4,9 @@ import 'crash_detector.dart';
 import 'crash_countdown_dialog.dart';
 import 'simulation_panel.dart';
 import 'incident_feedback_sheet.dart';
+import 'incident_log_service.dart';
+import 'incident_log_sheet.dart';
+import 'foreground_service_manager.dart';
 import 'package:another_telephony/telephony.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -169,6 +172,7 @@ class _ShellState extends State<Shell> {
   @override
   void initState() {
     super.initState();
+    ForegroundServiceManager.startService();
     tracker.start();
     contacts.load();
     crashDetector.startHardwareFeed();
@@ -180,6 +184,8 @@ class _ShellState extends State<Shell> {
 
   void _onTrackerUpdate() {
     crashDetector.feedGpsSpeed(tracker.speed);
+    ForegroundServiceManager.updateNotification(
+        'Speed: ${tracker.speed.toStringAsFixed(1)} km/h • Helmet: ${helmet.connected ? "Connected" : "Disconnected"}');
   }
 
   void _onGyroUpdate() {
@@ -205,6 +211,18 @@ class _ShellState extends State<Shell> {
     _isShowingCountdown = true;
     if (!mounted) return;
 
+    // Log the initial crash detection incident to offline storage
+    IncidentLogService.logIncident(IncidentRecord(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      timestamp: DateTime.now(),
+      type: IncidentType.crashAlert,
+      latitude: tracker.pos?.latitude,
+      longitude: tracker.pos?.longitude,
+      speedKmh: tracker.speed,
+      maxImpactG: crashDetector.lastAccelG,
+      maxGyroDps: crashDetector.lastGyroMag,
+    ));
+
     await showGeneralDialog(
       context: context,
       barrierDismissible: false,
@@ -213,10 +231,21 @@ class _ShellState extends State<Shell> {
         totalSeconds: 15,
         onCancel: () {
           crashDetector.acknowledge();
+          IncidentLogService.updateLatestFeedback('Cancelled by rider');
           Navigator.of(dialogContext, rootNavigator: true).pop();
           _showFeedbackSheet();
         },
         onTimeout: () {
+          IncidentLogService.logIncident(IncidentRecord(
+            id: DateTime.now().millisecondsSinceEpoch.toString(),
+            timestamp: DateTime.now(),
+            type: IncidentType.sosDispatched,
+            latitude: tracker.pos?.latitude,
+            longitude: tracker.pos?.longitude,
+            speedKmh: tracker.speed,
+            maxImpactG: crashDetector.lastAccelG,
+            maxGyroDps: crashDetector.lastGyroMag,
+          ));
           Navigator.of(dialogContext, rootNavigator: true).pop();
           sendSosAlert(
             context: context,
@@ -239,14 +268,15 @@ class _ShellState extends State<Shell> {
       builder: (bottomSheetContext) => IncidentFeedbackSheet(
         onFeedbackSelected: (reason) {
           final label = switch (reason) {
-            IncidentReason.pothole => 'Feedback logged: Road bump / pothole',
-            IncidentReason.droppedPhone => 'Feedback logged: Phone dropped / mount loose',
-            IncidentReason.minorFallSafe => 'Feedback logged: Minor fall (unhurt)',
-            IncidentReason.otherFalseAlarm => 'Feedback logged: False alarm',
+            IncidentReason.pothole => 'Road bump / pothole',
+            IncidentReason.droppedPhone => 'Phone dropped / mount loose',
+            IncidentReason.minorFallSafe => 'Minor fall (unhurt)',
+            IncidentReason.otherFalseAlarm => 'False alarm',
             IncidentReason.dismissed => 'Resumed ride',
           };
+          IncidentLogService.updateLatestFeedback(label);
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(label), duration: const Duration(seconds: 2)),
+            SnackBar(content: Text('Feedback logged: $label'), duration: const Duration(seconds: 2)),
           );
         },
         onSendReassuranceText: _sendReassuranceMessage,
@@ -267,6 +297,7 @@ class _ShellState extends State<Shell> {
           await sms.sendSms(to: n, message: text);
         } catch (_) {}
       }
+      IncidentLogService.updateLatestFeedback('Minor fall (unhurt)', reassuranceSent: true);
       msg.showSnackBar(
         const SnackBar(content: Text("'I'm Safe' reassurance text sent to contacts")),
       );
@@ -275,6 +306,7 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    ForegroundServiceManager.stopService();
     tracker.removeListener(_onTrackerUpdate);
     helmet.gyro.removeListener(_onGyroUpdate);
     crashDetector.removeListener(_onCrashUpdate);
@@ -398,10 +430,29 @@ class HomePage extends StatelessWidget {
         builder: (context, _) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Row(children: [
-              const Text('SmartKavach',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
-            ]),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('SmartKavach',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+                TextButton.icon(
+                  onPressed: () => showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (_) => const IncidentLogSheet(),
+                  ),
+                  icon: const Icon(Icons.history, size: 16, color: Color(0xFF3DDC97)),
+                  label: const Text('Ride Log',
+                      style: TextStyle(color: Color(0xFF3DDC97), fontSize: 13, fontWeight: FontWeight.w600)),
+                  style: TextButton.styleFrom(
+                    backgroundColor: kCard,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
             Row(children: [
               InkWell(

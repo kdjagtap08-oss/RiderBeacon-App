@@ -15,8 +15,8 @@ This document tracks the step-by-step implementation of the SmartKavach Crash De
 | **Milestone 4** | Automated SOS & Post-Incident Feedback Sheet (`IncidentFeedbackSheet`) | **DONE** | Oct 12, 2026 |
 | **Milestone 5** | ESP32 Helmet Firmware (`smartkavach_helmet.ino`) | **DONE** | Oct 12, 2026 |
 | **Milestone 6** | Stage 4A Baseline ML Model (Public Datasets & TFLite Pipeline) | **DONE** | Oct 12, 2026 |
+| **Phase 5** | Background Foreground Service & Offline Incident Logs | **DONE** | Oct 12, 2026 |
 | **Phase 4B** | Empirical Synthetic Dataset & Fine-Tuned Model (Post-Hardware) | **QUEUED** | — |
-| **Phase 5** | Background Foreground Service & Offline Incident Logs | **NOT STARTED** | — |
 
 ---
 
@@ -84,5 +84,8 @@ This document tracks the step-by-step implementation of the SmartKavach Crash De
 ---
 
 ### Phase 5: Background Tracking & Incident Logs
-- [ ] Implement Android Foreground Service (`flutter_foreground_task`) with persistent notification.
-- [ ] Implement local storage logging for confirmed crash telemetry events.
+- [x] Implement Android Foreground Service (`flutter_foreground_task`) with persistent notification (`ForegroundServiceManager`).
+- [x] Declare foreground service types (`location|connectedDevice`) and permissions in `AndroidManifest.xml`.
+- [x] Implement local offline telemetry incident logging (`IncidentLogService`).
+- [x] Build interactive Ride Incident Timeline viewer modal (`IncidentLogSheet`) with telemetry badges.
+- [x] Add prominent 'Ride Log' trigger to Home screen.
