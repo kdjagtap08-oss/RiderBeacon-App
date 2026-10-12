@@ -2,6 +2,7 @@ import 'dart:async';
 import 'gyro.dart';
 import 'crash_detector.dart';
 import 'crash_countdown_dialog.dart';
+import 'simulation_panel.dart';
 import 'package:another_telephony/telephony.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -456,6 +457,8 @@ class HomePage extends StatelessWidget {
             ),
                 const SizedBox(height: 16),
                 GyroPanel(g: h.gyro),
+                const SizedBox(height: 16),
+                SimulationPanel(detector: crash),
                 const SizedBox(height: 20),
             GestureDetector(
               onLongPress: () => sendSosAlert(

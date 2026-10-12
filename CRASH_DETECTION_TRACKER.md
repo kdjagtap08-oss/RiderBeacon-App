@@ -11,8 +11,8 @@ This document tracks the step-by-step implementation of the SmartKavach Crash De
 | **Setup & Toolchain** | Homebrew tools, Flutter SDK, Android SDK, and Phone Debugging | **DONE** | Oct 12, 2026 |
 | **Milestone 1** | Core Crash Detection Fusion Engine (`lib/crash_detector.dart`) | **DONE** | Oct 12, 2026 |
 | **Milestone 2** | 15s Safety Countdown Modal & Emergency Haptics | **DONE** | Oct 12, 2026 |
-| **Milestone 3** | In-App Simulation & Testing Panel (Highway crash, pothole presets) | **IN PROGRESS** | — |
-| **Phase 3** | ESP32 Helmet Firmware (`smartkavach_helmet.ino`) | **NOT STARTED** | — |
+| **Milestone 3** | In-App Simulation & Testing Panel (Highway crash, pothole presets) | **DONE** | Oct 12, 2026 |
+| **Milestone 4** | Automated SOS Dispatch Integration (GPS coords, silent SMS, direct calling) | **IN PROGRESS** | — |
 | **Phase 4A** | Baseline ML Model using Public Datasets | **NOT STARTED** | — |
 | **Phase 4B** | Empirical Synthetic Dataset & Fine-Tuned Model (Post-Hardware) | **QUEUED** | — |
 | **Phase 5** | Background Foreground Service & Offline Incident Logs | **NOT STARTED** | — |
@@ -45,12 +45,13 @@ This document tracks the step-by-step implementation of the SmartKavach Crash De
 ---
 
 ### Phase 2: In-App Simulation & Testing Panel
-- [ ] Build collapsible Simulation & Debug card in Ride tab (`HomePage`).
-- [ ] Add one-tap test scenarios:
-  - [ ] **"Simulate Highway Crash"** (High speed $\rightarrow$ Impact $\rightarrow$ Stop $\rightarrow$ Stillness $\rightarrow$ Modal triggers).
-  - [ ] **"Simulate Pothole"** (High $Z$-accel $\rightarrow$ No tumble $\rightarrow$ Speed maintained $\rightarrow$ Ignored).
-  - [ ] **"Simulate Dropped Phone"** (Impact spike $\rightarrow$ Initial speed 0 $\rightarrow$ Ignored).
-- [ ] Add manual sliders for real-time testing of Speed, $g$-force, and Gyro rotation.
+- [x] Build collapsible Simulation & Debug card in Ride tab (`HomePage`) (`lib/simulation_panel.dart`).
+- [x] Add one-tap test scenarios:
+  - [x] **"Crash Preset"** (Highway speed $\rightarrow$ Impact $\rightarrow$ Deceleration $\rightarrow$ Stillness $\rightarrow$ Launches 15s Countdown Modal).
+  - [x] **"Pothole"** (Vertical spike $\rightarrow$ 0°/s gyro $\rightarrow$ Speed maintained $\rightarrow$ Ignored).
+  - [x] **"Dropped Phone"** (High shock $\rightarrow$ 0 initial speed $\rightarrow$ Ignored).
+- [x] Add manual sliders for real-time testing of Speed ($0–140\text{ km/h}$), Accel ($0.5–8g$), and Gyro ($0–500^\circ/\text{s}$).
+- [x] Create widget tests in `test/simulation_panel_test.dart` (5/5 passing).
 
 ---
 
