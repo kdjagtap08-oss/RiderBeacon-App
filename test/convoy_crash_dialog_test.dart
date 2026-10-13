@@ -98,10 +98,10 @@ void main() {
       await tester.tap(find.text('Start Convoy'));
       await tester.pumpAndSettle();
 
-      // Ride should now be created in groupRideService
+      // Ride should now be created in groupRideService with leader + 3 simulated bots
       expect(groupRideService.currentRide, isNotNull);
       expect(groupRideService.currentRide?.title, equals('Sunday Morning Convoy'));
-      expect(groupRideService.currentRide?.members.length, equals(1));
+      expect(groupRideService.currentRide?.members.length, equals(4));
     });
   });
 }

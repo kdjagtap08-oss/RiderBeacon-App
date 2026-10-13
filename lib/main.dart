@@ -25,6 +25,7 @@ import 'group_ride_sheet.dart';
 import 'convoy_crash_dialog.dart';
 import 'convoy_join_dialog.dart';
 import 'auth_service.dart';
+import 'package:app_links/app_links.dart';
 
 const kBg = Color(0xFF0E1116);
 const kCard = Color(0xFF181D25);
@@ -177,6 +178,8 @@ class _ShellState extends State<Shell> {
   final crashDetector = CrashDetector();
   final authService = AuthService();
   final groupRideService = GroupRideService();
+  final _appLinks = AppLinks();
+  StreamSubscription<Uri>? _linkSub;
   StreamSubscription<List<ConvoyMemberMetric>>? _convoySub;
   String? _lastAlertedCrashUserId;
   bool _isShowingCountdown = false;
@@ -196,6 +199,55 @@ class _ShellState extends State<Shell> {
     crashDetector.addListener(_onCrashUpdate);
 
     _convoySub = groupRideService.convoyMetricsStream.listen(_onConvoyMetricsUpdate);
+    _initDeepLinks();
+  }
+
+  void _initDeepLinks() {
+    _linkSub = _appLinks.uriLinkStream.listen((uri) {
+      _handleDeepLink(uri);
+    });
+  }
+
+  Future<void> _handleDeepLink(Uri uri) async {
+    // Matches https://smartkavach.app/ride/{code} or smartkavach://ride/{code}
+    String? code;
+    if (uri.pathSegments.isNotEmpty) {
+      if (uri.pathSegments.first == 'ride' && uri.pathSegments.length >= 2) {
+        code = uri.pathSegments[1].toUpperCase();
+      } else if (uri.pathSegments.length == 1 && uri.host == 'ride') {
+        code = uri.pathSegments[0].toUpperCase();
+      }
+    }
+    if (code != null && code.length >= 4) {
+      try {
+        final user = authService.currentUser ?? await authService.init();
+        await groupRideService.joinRide(
+          rideCode: code,
+          userId: user.id,
+          displayName: user.displayName,
+          photoUrl: user.photoUrl,
+          phoneNumber: user.phoneNumber,
+          initialPosition: tracker.pos ?? const LatLng(19.0760, 72.8777),
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Joined Convoy ($code) successfully!'),
+              backgroundColor: const Color(0xFF3DDC97),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not join ride: ${e.toString().replaceAll("Exception: ", "")}'),
+              backgroundColor: const Color(0xFFE5323B),
+            ),
+          );
+        }
+      }
+    }
   }
 
   void _onTrackerUpdate() {
@@ -372,6 +424,7 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    _linkSub?.cancel();
     _convoySub?.cancel();
     ForegroundServiceManager.stopService();
     tracker.removeListener(_onTrackerUpdate);
@@ -522,6 +575,7 @@ class HomePage extends StatelessWidget {
       builder: (_) => GroupRideSheet(
         ride: ride,
         metrics: groupRide!.currentMetrics,
+        convoyMetricsStream: groupRide!.convoyMetricsStream,
         currentUserId: auth?.currentUser?.id ?? groupRide!.currentUserId ?? '',
         onStatusChanged: (status) => groupRide!.updateMyStatus(status),
         onShareInvite: () => GroupRideService.shareInvite(ride),
@@ -795,6 +849,21 @@ class HomePage extends StatelessWidget {
                 GyroPanel(g: h.gyro),
                 const SizedBox(height: 16),
                 SimulationPanel(detector: crash),
+                if (groupRide != null && groupRide!.currentRide != null) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFE5323B),
+                      side: const BorderSide(color: Color(0xFFE5323B)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.warning_amber_rounded, size: 18),
+                    label: const Text('Simulate Bot Crash (Vikram) • Test Alert Popup'),
+                    onPressed: () {
+                      groupRide!.simulateBotCrash();
+                    },
+                  ),
+                ],
                 const SizedBox(height: 20),
             GestureDetector(
               onLongPress: () => sendSosAlert(

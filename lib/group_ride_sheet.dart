@@ -12,11 +12,14 @@ const kRefuelYellow = Color(0xFFF1C40F);
 /// "Ride Together" Convoy Bottom Sheet matching the reel design.
 ///
 /// Features:
+/// "Ride Together" Convoy Bottom Sheet matching the reel design.
+///
+/// Features:
 /// 1. Convoy header with Ride Code & WhatsApp Share button.
 /// 2. Ordered member list along convoy line (ahead -> you -> behind).
 /// 3. Direct quick actions per rider: 📞 Call and ↗️ Directions / Navigate.
 /// 4. Quick status selector: Riding, Refueling, Tea Break, Issue.
-class GroupRideSheet extends StatelessWidget {
+class GroupRideSheet extends StatefulWidget {
   const GroupRideSheet({
     super.key,
     required this.ride,
@@ -25,6 +28,7 @@ class GroupRideSheet extends StatelessWidget {
     required this.onStatusChanged,
     required this.onShareInvite,
     required this.onNavigateToMember,
+    this.convoyMetricsStream,
   });
 
   final GroupRide ride;
@@ -33,9 +37,32 @@ class GroupRideSheet extends StatelessWidget {
   final ValueChanged<RiderStatus> onStatusChanged;
   final VoidCallback onShareInvite;
   final ValueChanged<RideMember> onNavigateToMember;
+  final Stream<List<ConvoyMemberMetric>>? convoyMetricsStream;
+
+  @override
+  State<GroupRideSheet> createState() => _GroupRideSheetState();
+}
+
+class _GroupRideSheetState extends State<GroupRideSheet> {
+  RiderStatus? _optimisticStatus;
 
   @override
   Widget build(BuildContext context) {
+    if (widget.convoyMetricsStream == null) {
+      return _buildContent(context, widget.metrics);
+    }
+
+    return StreamBuilder<List<ConvoyMemberMetric>>(
+      stream: widget.convoyMetricsStream,
+      initialData: widget.metrics,
+      builder: (context, snapshot) {
+        final currentMetrics = snapshot.data ?? widget.metrics;
+        return _buildContent(context, currentMetrics);
+      },
+    );
+  }
+
+  Widget _buildContent(BuildContext context, List<ConvoyMemberMetric> activeMetrics) {
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFF141820),
@@ -72,7 +99,7 @@ class GroupRideSheet extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        ride.title.isNotEmpty ? ride.title : 'Ride Together',
+                        widget.ride.title.isNotEmpty ? widget.ride.title : 'Ride Together',
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
@@ -82,7 +109,7 @@ class GroupRideSheet extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        'Code: ${ride.rideCode} • ${metrics.length} Riders in Convoy',
+                        'Code: ${widget.ride.rideCode} • ${activeMetrics.length} Riders in Convoy',
                         style: const TextStyle(
                           fontSize: 12,
                           color: Colors.white60,
@@ -92,7 +119,7 @@ class GroupRideSheet extends StatelessWidget {
                   ),
                 ),
                 FilledButton.icon(
-                  onPressed: onShareInvite,
+                  onPressed: widget.onShareInvite,
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF25D366), // WhatsApp green
                     foregroundColor: Colors.white,
@@ -112,7 +139,7 @@ class GroupRideSheet extends StatelessWidget {
           const Divider(color: Colors.white12, height: 1),
 
           // Quick My Status Selector Bar
-          _buildMyStatusSelector(),
+          _buildMyStatusSelector(activeMetrics),
 
           const Divider(color: Colors.white12, height: 1),
 
@@ -120,10 +147,10 @@ class GroupRideSheet extends StatelessWidget {
           Expanded(
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              itemCount: metrics.length,
+              itemCount: activeMetrics.length,
               separatorBuilder: (_, _) => _buildDottedConnector(),
               itemBuilder: (context, index) {
-                final metric = metrics[index];
+                final metric = activeMetrics[index];
                 return _buildMemberTile(context, metric);
               },
             ),
@@ -133,12 +160,12 @@ class GroupRideSheet extends StatelessWidget {
     );
   }
 
-  Widget _buildMyStatusSelector() {
-    final myMetric = metrics.firstWhere(
-      (m) => m.member.userId == currentUserId,
-      orElse: () => metrics.first,
+  Widget _buildMyStatusSelector(List<ConvoyMemberMetric> activeMetrics) {
+    final myMetric = activeMetrics.firstWhere(
+      (m) => m.member.userId == widget.currentUserId,
+      orElse: () => activeMetrics.first,
     );
-    final currentStatus = myMetric.member.status;
+    final currentStatus = _optimisticStatus ?? myMetric.member.status;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -194,7 +221,10 @@ class GroupRideSheet extends StatelessWidget {
         selected: isSelected,
         selectedColor: kGoodGreen,
         backgroundColor: const Color(0xFF1E2530),
-        onSelected: (_) => onStatusChanged(status),
+        onSelected: (_) {
+          setState(() => _optimisticStatus = status);
+          widget.onStatusChanged(status);
+        },
         visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.symmetric(horizontal: 4),
       ),
@@ -217,7 +247,7 @@ class GroupRideSheet extends StatelessWidget {
 
   Widget _buildMemberTile(BuildContext context, ConvoyMemberMetric metric) {
     final member = metric.member;
-    final isMe = member.userId == currentUserId;
+    final isMe = member.userId == widget.currentUserId;
     final isCrash = member.status == RiderStatus.crashAlert;
 
     final statusColor = switch (member.status) {
@@ -359,7 +389,7 @@ class GroupRideSheet extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.navigation, size: 20, color: kAccentOrange),
               tooltip: 'Directions to ${member.displayName}',
-              onPressed: () => onNavigateToMember(member),
+              onPressed: () => widget.onNavigateToMember(member),
             ),
           ],
         ],

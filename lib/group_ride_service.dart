@@ -215,6 +215,69 @@ class GroupRideService {
     return ride;
   }
 
+  /// Injects simulated convoy bots into the current ride for single-phone testing.
+  Future<void> spawnSimulatedBots() async {
+    if (_currentRide == null || _myMember == null) return;
+
+    final myLat = _myMember!.position.latitude;
+    final myLng = _myMember!.position.longitude;
+    final code = _currentRide!.rideCode;
+
+    // Bot 1: Vikram ahead by ~400m
+    final bot1 = RideMember(
+      userId: 'bot_vikram',
+      displayName: 'Vikram (Bot)',
+      position: LatLng(myLat + 0.0036, myLng + 0.0025),
+      speedKmh: 48.0,
+      heading: 45.0,
+      status: RiderStatus.riding,
+      lastPing: DateTime.now(),
+      phoneNumber: '+919876543210',
+    );
+
+    // Bot 2: Rohan behind by ~300m, refueling
+    final bot2 = RideMember(
+      userId: 'bot_rohan',
+      displayName: 'Rohan (Bot)',
+      position: LatLng(myLat - 0.0028, myLng - 0.0018),
+      speedKmh: 0.0,
+      heading: 45.0,
+      status: RiderStatus.refueling,
+      lastPing: DateTime.now(),
+      phoneNumber: '+919123456789',
+    );
+
+    // Bot 3: Ananya trailing behind by ~800m
+    final bot3 = RideMember(
+      userId: 'bot_ananya',
+      displayName: 'Ananya (Bot)',
+      position: LatLng(myLat - 0.0072, myLng - 0.0045),
+      speedKmh: 52.0,
+      heading: 45.0,
+      status: RiderStatus.teaBreak,
+      lastPing: DateTime.now(),
+      phoneNumber: '+919988776655',
+    );
+
+    await _backend.updateMember(code, bot1);
+    await _backend.updateMember(code, bot2);
+    await _backend.updateMember(code, bot3);
+  }
+
+  /// Triggers a simulated crash for a bot rider to test peer crash alert popups.
+  Future<void> simulateBotCrash() async {
+    if (_currentRide == null) return;
+    final code = _currentRide!.rideCode;
+    final bot = _currentRide!.members['bot_vikram'];
+    if (bot != null) {
+      final crashed = bot.copyWith(
+        status: RiderStatus.crashAlert,
+        lastPing: DateTime.now(),
+      );
+      await _backend.updateMember(code, crashed);
+    }
+  }
+
   /// Joins an existing ride by its 4-character code.
   Future<GroupRide> joinRide({
     required String rideCode,

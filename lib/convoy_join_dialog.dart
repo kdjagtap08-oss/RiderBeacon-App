@@ -31,6 +31,8 @@ class _ConvoyJoinDialogState extends State<ConvoyJoinDialog>
   bool _isLoading = false;
   String? _errorMessage;
 
+  bool _addSimulatedBots = true; // Auto-checked so user can test alone with 1 phone!
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +71,10 @@ class _ConvoyJoinDialogState extends State<ConvoyJoinDialog>
         phoneNumber: user.phoneNumber,
         initialPosition: widget.currentLocation,
       );
+
+      if (_addSimulatedBots) {
+        await widget.groupRideService.spawnSimulatedBots();
+      }
 
       if (mounted) {
         Navigator.of(context).pop(true);
@@ -200,7 +206,7 @@ class _ConvoyJoinDialogState extends State<ConvoyJoinDialog>
             ],
 
             SizedBox(
-              height: 160,
+              height: 220,
               child: TabBarView(
                 controller: _tabController,
                 children: [
@@ -275,7 +281,28 @@ class _ConvoyJoinDialogState extends State<ConvoyJoinDialog>
                           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                         ),
                       ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 6),
+                      InkWell(
+                        onTap: () => setState(() => _addSimulatedBots = !_addSimulatedBots),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Row(
+                          children: [
+                            Checkbox(
+                              value: _addSimulatedBots,
+                              onChanged: (v) => setState(() => _addSimulatedBots = v ?? true),
+                              activeColor: kAccentOrange,
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            const Expanded(
+                              child: Text(
+                                'Add 3 simulated bots (test solo on 1 phone)',
+                                style: TextStyle(fontSize: 11, color: Colors.white70),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton(
