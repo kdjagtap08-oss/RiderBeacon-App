@@ -11,7 +11,7 @@ This document tracks the step-by-step implementation of the SmartKavach Group Ri
 | **Branch & Blueprint** | Created `feature/group-rides-cloud`, blueprint and tracker | **DONE** | Oct 13, 2026 |
 | **Milestone 1** | Convoy Models & Relative Geometry Engine (`convoy_calculator.dart`) | **DONE** | Oct 13, 2026 |
 | **Milestone 2** | Convoy Map Markers & "Ride Together" Roster Sheet | **DONE** | Oct 13, 2026 |
-| **Milestone 3** | Realtime Group Ride Service & WhatsApp Invite Generator | **QUEUED** | — |
+| **Milestone 3** | Realtime Group Ride Service & WhatsApp Invite Generator | **DONE** | Oct 13, 2026 |
 | **Milestone 4** | Google Sign-In & Cloud User Profile Integration | **QUEUED** | — |
 | **Milestone 5** | Group Emergency Mesh Alert (Crash auto-broadcast to all riders) | **QUEUED** | — |
 
@@ -41,12 +41,12 @@ This document tracks the step-by-step implementation of the SmartKavach Group Ri
 ---
 
 ### Milestone 3: Realtime Group Ride Service & Invite Generator
-- [ ] Implement `lib/group_ride_service.dart`:
-  - [ ] 4-character ride code generator (e.g. `SK-8492`).
-  - [ ] WhatsApp invite text and deep-link generation.
-  - [ ] Periodic 3s GPS telemetry sync with offline fallback.
-  - [ ] Mock simulation mode for automated testing without live Firebase network calls.
-- [ ] Create unit and mock service tests in `test/group_ride_service_test.dart`.
+- [x] Implement `lib/group_ride_service.dart`:
+  - [x] 4-character ride code generator (e.g. `SK-8492` avoiding ambiguous chars).
+  - [x] WhatsApp invite text and deep-link generation with `url_launcher` and `share_plus` fallback.
+  - [x] Throttled 3s GPS telemetry sync with emergency zero-throttle bypass.
+  - [x] InMemory cloud backend (`GroupRideBackend` abstraction) for offline testing and zero cloud bill.
+- [x] Create unit and mock service tests in `test/group_ride_service_test.dart` (9/9 passing).
 
 ---
 

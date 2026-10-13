@@ -124,6 +124,29 @@ class GroupRide {
     this.members = const {},
   });
 
+  GroupRide copyWith({
+    String? rideCode,
+    String? title,
+    String? leaderId,
+    String? leaderName,
+    DateTime? createdAt,
+    bool? isActive,
+    String? destinationName,
+    LatLng? destinationLocation,
+    Map<String, RideMember>? members,
+  }) =>
+      GroupRide(
+        rideCode: rideCode ?? this.rideCode,
+        title: title ?? this.title,
+        leaderId: leaderId ?? this.leaderId,
+        leaderName: leaderName ?? this.leaderName,
+        createdAt: createdAt ?? this.createdAt,
+        isActive: isActive ?? this.isActive,
+        destinationName: destinationName ?? this.destinationName,
+        destinationLocation: destinationLocation ?? this.destinationLocation,
+        members: members ?? this.members,
+      );
+
   Map<String, dynamic> toJson() => {
         'rideCode': rideCode,
         'title': title,
