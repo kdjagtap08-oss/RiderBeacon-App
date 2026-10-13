@@ -24,6 +24,7 @@ import 'convoy_rider_marker.dart';
 import 'group_ride_sheet.dart';
 import 'convoy_crash_dialog.dart';
 import 'convoy_join_dialog.dart';
+import 'convoy_route_service.dart';
 import 'auth_service.dart';
 import 'package:app_links/app_links.dart';
 
@@ -578,7 +579,9 @@ Future<void> sendSosAlert({
 
 // ───────────────────────── Ride tab ─────────────────────────
 
-class HomePage extends StatelessWidget {
+// ───────────────────────── Ride tab ─────────────────────────
+
+class HomePage extends StatefulWidget {
   const HomePage({
     super.key,
     required this.t,
@@ -598,36 +601,103 @@ class HomePage extends StatelessWidget {
   final AuthService? auth;
   final GroupRideService? groupRide;
 
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  final Map<String, List<LatLng>> _memberRoutes = {};
+  final Set<String> _offTrackMembers = {};
+  String? _lastRouteRideCode;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAndFetchRoutes();
+  }
+
+  void _checkAndFetchRoutes() {
+    final ride = widget.groupRide?.currentRide;
+    if (ride == null || ride.destinationLocation == null) {
+      if (_memberRoutes.isNotEmpty) {
+        setState(() {
+          _memberRoutes.clear();
+          _offTrackMembers.clear();
+        });
+      }
+      return;
+    }
+
+    final dest = ride.destinationLocation!;
+    final rideCode = ride.rideCode;
+
+    // Fetch route for each member
+    for (final member in ride.members.values) {
+      final key = member.userId;
+      if (!_memberRoutes.containsKey(key) || _lastRouteRideCode != rideCode) {
+        ConvoyRouteService.fetchDrivingRoute(
+          start: member.position,
+          destination: dest,
+        ).then((points) {
+          if (mounted) {
+            setState(() {
+              _memberRoutes[key] = points;
+              _evaluateOffTrack(key, member.position, points);
+            });
+          }
+        });
+      } else {
+        // Re-evaluate off-track
+        final points = _memberRoutes[key]!;
+        _evaluateOffTrack(key, member.position, points);
+      }
+    }
+    _lastRouteRideCode = rideCode;
+  }
+
+  void _evaluateOffTrack(String userId, LatLng position, List<LatLng> routePoints) {
+    final offTrack = ConvoyRouteService.isRiderOffTrack(
+      position: position,
+      routePoints: routePoints,
+      thresholdMeters: 120.0,
+    );
+    if (offTrack && !_offTrackMembers.contains(userId)) {
+      _offTrackMembers.add(userId);
+    } else if (!offTrack && _offTrackMembers.contains(userId)) {
+      _offTrackMembers.remove(userId);
+    }
+  }
+
   void _openConvoyDialog(BuildContext context) {
-    if (auth == null || groupRide == null) return;
+    if (widget.auth == null || widget.groupRide == null) return;
     showDialog(
       context: context,
       builder: (_) => ConvoyJoinDialog(
-        authService: auth!,
-        groupRideService: groupRide!,
-        currentLocation: t.pos ?? const LatLng(19.0760, 72.8777),
+        authService: widget.auth!,
+        groupRideService: widget.groupRide!,
+        currentLocation: widget.t.pos ?? const LatLng(19.0760, 72.8777),
       ),
     );
   }
 
   void _openGroupRideSheet(BuildContext context, GroupRide ride) {
-    if (groupRide == null) return;
+    if (widget.groupRide == null) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => GroupRideSheet(
         ride: ride,
-        metrics: groupRide!.currentMetrics,
-        convoyMetricsStream: groupRide!.convoyMetricsStream,
-        currentUserId: auth?.currentUser?.id ?? groupRide!.currentUserId ?? '',
-        onStatusChanged: (status) => groupRide!.updateMyStatus(status),
+        metrics: widget.groupRide!.currentMetrics,
+        convoyMetricsStream: widget.groupRide!.convoyMetricsStream,
+        currentUserId: widget.auth?.currentUser?.id ?? widget.groupRide!.currentUserId ?? '',
+        onStatusChanged: (status) => widget.groupRide!.updateMyStatus(status),
         onShareInvite: () => GroupRideService.shareInvite(ride),
         onNavigateToMember: (member) =>
             GroupRideService.openDirectionsTo(member.position),
         onLocateMemberOnMap: (member) {
           Navigator.of(context).pop();
-          t.moveToLocation(member.position, zoom: 16);
+          widget.t.moveToLocation(member.position, zoom: 16);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Focused on ${member.displayName} on map'),
@@ -640,8 +710,10 @@ class HomePage extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([t, h, contacts]),
+  Widget build(BuildContext context) {
+    _checkAndFetchRoutes();
+    return ListenableBuilder(
+        listenable: Listenable.merge([widget.t, widget.h, widget.contacts]),
         builder: (context, _) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -672,7 +744,7 @@ class HomePage extends StatelessWidget {
             Row(children: [
               InkWell(
                 borderRadius: BorderRadius.circular(20),
-                onTap: openHelmet,
+                onTap: widget.openHelmet,
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -680,9 +752,9 @@ class HomePage extends StatelessWidget {
                       color: kCard, borderRadius: BorderRadius.circular(20)),
                   child: Row(children: [
                     Icon(Icons.circle,
-                        size: 10, color: h.connected ? kGood : Colors.white38),
+                        size: 10, color: widget.h.connected ? kGood : Colors.white38),
                     const SizedBox(width: 8),
-                    Text(h.connected ? 'Helmet connected' : 'Connect helmet',
+                    Text(widget.h.connected ? 'Helmet connected' : 'Connect helmet',
                         style: const TextStyle(fontSize: 13)),
                   ]),
                 ),
@@ -691,7 +763,7 @@ class HomePage extends StatelessWidget {
               InkWell(
                 borderRadius: BorderRadius.circular(20),
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => SosSettingsPage(contacts: contacts))),
+                    builder: (_) => SosSettingsPage(contacts: widget.contacts))),
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -705,11 +777,11 @@ class HomePage extends StatelessWidget {
                 ),
               ),
             ]),
-            if (groupRide != null) ...[
+            if (widget.groupRide != null) ...[
               const SizedBox(height: 12),
               StreamBuilder<GroupRide?>(
-                stream: groupRide!.rideStream,
-                initialData: groupRide!.currentRide,
+                stream: widget.groupRide!.rideStream,
+                initialData: widget.groupRide!.currentRide,
                 builder: (context, snapshot) {
                   final activeRide = snapshot.data;
                   if (activeRide == null) {
@@ -782,7 +854,7 @@ class HomePage extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 Text(
-                                  'Code: ${activeRide.rideCode} • ${activeRide.members.length} Riders in Convoy',
+                                  'Code: ${activeRide.rideCode} • ${activeRide.members.length} Riders in Convoy${activeRide.destinationName != null ? " • To: ${activeRide.destinationName}" : ""}',
                                   style: const TextStyle(fontSize: 11, color: kGood, fontWeight: FontWeight.w600),
                                 ),
                               ],
@@ -809,7 +881,7 @@ class HomePage extends StatelessWidget {
                   child: Stack(alignment: Alignment.center, children: [
                     SizedBox.expand(
                       child: CircularProgressIndicator(
-                        value: (t.speed / 120).clamp(0.0, 1.0),
+                        value: (widget.t.speed / 120).clamp(0.0, 1.0),
                         strokeWidth: 14,
                         strokeCap: StrokeCap.round,
                         backgroundColor: Colors.white10,
@@ -817,7 +889,7 @@ class HomePage extends StatelessWidget {
                       ),
                     ),
                     Column(mainAxisSize: MainAxisSize.min, children: [
-                      Text(t.speed.toStringAsFixed(0),
+                      Text(widget.t.speed.toStringAsFixed(0),
                           style: const TextStyle(
                               fontSize: 68, fontWeight: FontWeight.w800)),
                       const Text('km/h',
@@ -827,10 +899,10 @@ class HomePage extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  t.error ??
-                      (t.pos == null
+                  widget.t.error ??
+                      (widget.t.pos == null
                           ? 'Waiting for GPS...'
-                          : '${t.pos!.latitude.toStringAsFixed(5)}, ${t.pos!.longitude.toStringAsFixed(5)}'),
+                          : '${widget.t.pos!.latitude.toStringAsFixed(5)}, ${widget.t.pos!.longitude.toStringAsFixed(5)}'),
                   style: const TextStyle(color: Colors.white54, fontSize: 13),
                 ),
               ]),
@@ -845,13 +917,13 @@ class HomePage extends StatelessWidget {
                   child: Stack(
                     children: [
                       FlutterMap(
-                        mapController: t.map,
+                        mapController: widget.t.map,
                         options: MapOptions(
-                          initialCenter: t.pos ?? const LatLng(20.5937, 78.9629),
-                          initialZoom: t.pos != null ? 17 : 4,
+                          initialCenter: widget.t.pos ?? const LatLng(20.5937, 78.9629),
+                          initialZoom: widget.t.pos != null ? 17 : 4,
                           onPositionChanged: (camera, hasGesture) {
-                            if (hasGesture && t.autoCenterOnUser) {
-                              t.autoCenterOnUser = false;
+                            if (hasGesture && widget.t.autoCenterOnUser) {
+                              widget.t.autoCenterOnUser = false;
                             }
                           },
                         ),
@@ -861,20 +933,77 @@ class HomePage extends StatelessWidget {
                                 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                             userAgentPackageName: 'com.example.smartkavach',
                           ),
-                          if (t.pos != null)
+
+                          // Planned Driving Route Polylines to Destination
+                          if (_memberRoutes.isNotEmpty)
+                            PolylineLayer(
+                              polylines: _memberRoutes.entries.map((entry) {
+                                final isMe = entry.key == (widget.auth?.currentUser?.id ?? widget.groupRide?.currentUserId);
+                                final isOffTrack = _offTrackMembers.contains(entry.key);
+                                final color = isOffTrack
+                                    ? const Color(0xFFFF4757).withValues(alpha: 0.8)
+                                    : isMe
+                                        ? const Color(0xFF3DDC97).withValues(alpha: 0.85)
+                                        : const Color(0xFF3498DB).withValues(alpha: 0.6);
+                                return Polyline(
+                                  points: entry.value,
+                                  strokeWidth: isMe ? 4.5 : 3.0,
+                                  color: color,
+                                );
+                              }).toList(),
+                            ),
+
+                          // Final Destination Pin
+                          if (widget.groupRide?.currentRide?.destinationLocation != null)
+                            MarkerLayer(
+                              markers: [
+                                Marker(
+                                  point: widget.groupRide!.currentRide!.destinationLocation!,
+                                  width: 80,
+                                  height: 40,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF1E2530),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: const Color(0xFF3DDC97), width: 1.5),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.flag, size: 14, color: Color(0xFF3DDC97)),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          widget.groupRide!.currentRide!.destinationName ?? 'Finish',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                          if (widget.t.pos != null)
                             MarkerLayer(markers: [
                               Marker(
-                                point: t.pos!,
+                                point: widget.t.pos!,
                                 width: 40,
                                 height: 40,
                                 child: const Icon(Icons.navigation,
                                     color: kAccent, size: 36),
                               ),
                             ]),
-                          if (groupRide != null)
+                          if (widget.groupRide != null)
                             StreamBuilder<List<ConvoyMemberMetric>>(
-                              stream: groupRide!.convoyMetricsStream,
-                              initialData: groupRide!.currentMetrics,
+                              stream: widget.groupRide!.convoyMetricsStream,
+                              initialData: widget.groupRide!.currentMetrics,
                               builder: (context, snap) {
                                 final metrics = snap.data ?? [];
                                 final otherMembers =
@@ -894,10 +1023,11 @@ class HomePage extends StatelessWidget {
                                             alignment: Alignment.center,
                                             child: ConvoyRiderMarker(
                                               metric: m,
+                                              isOffTrack: _offTrackMembers.contains(m.member.userId),
                                               onTap: () {
-                                                if (groupRide!.currentRide != null) {
+                                                if (widget.groupRide!.currentRide != null) {
                                                   _openGroupRideSheet(
-                                                      context, groupRide!.currentRide!);
+                                                      context, widget.groupRide!.currentRide!);
                                                 }
                                               },
                                             ),
@@ -912,10 +1042,10 @@ class HomePage extends StatelessWidget {
                       ),
 
                       // Off-screen Convoy Indicator / HUD overlay
-                      if (groupRide != null)
+                      if (widget.groupRide != null)
                         StreamBuilder<List<ConvoyMemberMetric>>(
-                          stream: groupRide!.convoyMetricsStream,
-                          initialData: groupRide!.currentMetrics,
+                          stream: widget.groupRide!.convoyMetricsStream,
+                          initialData: widget.groupRide!.currentMetrics,
                           builder: (context, snap) {
                             final metrics = snap.data ?? [];
                             final other = metrics.where((m) => m.position != RelativePosition.here).toList();
@@ -972,15 +1102,18 @@ class HomePage extends StatelessWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (groupRide != null && groupRide!.currentRide != null)
+                            if (widget.groupRide != null && widget.groupRide!.currentRide != null)
                               GestureDetector(
                                 onTap: () {
                                   final allPoints = <LatLng>[];
-                                  if (t.pos != null) allPoints.add(t.pos!);
-                                  for (final m in groupRide!.currentMetrics) {
+                                  if (widget.t.pos != null) allPoints.add(widget.t.pos!);
+                                  for (final m in widget.groupRide!.currentMetrics) {
                                     allPoints.add(m.member.position);
                                   }
-                                  t.fitBounds(allPoints);
+                                  if (widget.groupRide!.currentRide!.destinationLocation != null) {
+                                    allPoints.add(widget.groupRide!.currentRide!.destinationLocation!);
+                                  }
+                                  widget.t.fitBounds(allPoints);
                                 },
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
@@ -1000,11 +1133,11 @@ class HomePage extends StatelessWidget {
                                 ),
                               ),
                             GestureDetector(
-                              onTap: () => t.centerOnUser(zoom: 17),
+                              onTap: () => widget.t.centerOnUser(zoom: 17),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                                 decoration: BoxDecoration(
-                                  color: t.autoCenterOnUser ? const Color(0xFF3DDC97) : const Color(0xFF1E2530),
+                                  color: widget.t.autoCenterOnUser ? const Color(0xFF3DDC97) : const Color(0xFF1E2530),
                                   borderRadius: BorderRadius.circular(14),
                                   border: Border.all(color: Colors.white24),
                                 ),
@@ -1013,7 +1146,7 @@ class HomePage extends StatelessWidget {
                                     Icon(
                                       Icons.my_location,
                                       size: 13,
-                                      color: t.autoCenterOnUser ? Colors.black : Colors.white,
+                                      color: widget.t.autoCenterOnUser ? Colors.black : Colors.white,
                                     ),
                                     const SizedBox(width: 4),
                                     Text(
@@ -1021,7 +1154,7 @@ class HomePage extends StatelessWidget {
                                       style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
-                                        color: t.autoCenterOnUser ? Colors.black : Colors.white,
+                                        color: widget.t.autoCenterOnUser ? Colors.black : Colors.white,
                                       ),
                                     ),
                                   ],
@@ -1037,10 +1170,10 @@ class HomePage extends StatelessWidget {
               ),
             ),
                 const SizedBox(height: 16),
-                GyroPanel(g: h.gyro),
+                GyroPanel(g: widget.h.gyro),
                 const SizedBox(height: 16),
-                SimulationPanel(detector: crash),
-                if (groupRide != null && groupRide!.currentRide != null) ...[
+                SimulationPanel(detector: widget.crash),
+                if (widget.groupRide != null && widget.groupRide!.currentRide != null) ...[
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
@@ -1051,7 +1184,7 @@ class HomePage extends StatelessWidget {
                     icon: const Icon(Icons.warning_amber_rounded, size: 18),
                     label: const Text('Simulate Bot Crash (Vikram) • Test Alert Popup'),
                     onPressed: () {
-                      groupRide!.simulateBotCrash();
+                      widget.groupRide!.simulateBotCrash();
                     },
                   ),
                 ],
@@ -1059,8 +1192,8 @@ class HomePage extends StatelessWidget {
             GestureDetector(
               onLongPress: () => sendSosAlert(
                 context: context,
-                tracker: t,
-                contacts: contacts,
+                tracker: widget.t,
+                contacts: widget.contacts,
               ),
               child: Container(
                 height: 76,
@@ -1086,6 +1219,7 @@ class HomePage extends StatelessWidget {
           ],
         ),
       );
+  }
 }
 
 // ───────────────────────── Helmet tab ─────────────────────────

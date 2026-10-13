@@ -27,6 +27,7 @@ class _ConvoyJoinDialogState extends State<ConvoyJoinDialog>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _titleController = TextEditingController(text: 'Sunday Morning Convoy');
+  final _destinationController = TextEditingController(text: 'Hilltop Cafe');
   final _codeController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
@@ -43,6 +44,7 @@ class _ConvoyJoinDialogState extends State<ConvoyJoinDialog>
   void dispose() {
     _tabController.dispose();
     _titleController.dispose();
+    _destinationController.dispose();
     _codeController.dispose();
     super.dispose();
   }
@@ -63,6 +65,16 @@ class _ConvoyJoinDialogState extends State<ConvoyJoinDialog>
       final user = widget.authService.currentUser ??
           await widget.authService.init();
 
+      final destName = _destinationController.text.trim();
+      LatLng? destLocation;
+      if (destName.isNotEmpty) {
+        // Compute a destination offset ahead of start location (~2.5 km north-east)
+        destLocation = LatLng(
+          widget.currentLocation.latitude + 0.018,
+          widget.currentLocation.longitude + 0.015,
+        );
+      }
+
       await widget.groupRideService.createRide(
         title: title,
         leaderId: user.id,
@@ -70,6 +82,8 @@ class _ConvoyJoinDialogState extends State<ConvoyJoinDialog>
         photoUrl: user.photoUrl,
         phoneNumber: user.phoneNumber,
         initialPosition: widget.currentLocation,
+        destinationName: destName.isEmpty ? null : destName,
+        destinationLocation: destLocation,
       );
 
       if (_addSimulatedBots) {
@@ -206,7 +220,7 @@ class _ConvoyJoinDialogState extends State<ConvoyJoinDialog>
             ],
 
             SizedBox(
-              height: 220,
+              height: 290,
               child: TabBarView(
                 controller: _tabController,
                 children: [
@@ -263,65 +277,84 @@ class _ConvoyJoinDialogState extends State<ConvoyJoinDialog>
                   ),
 
                   // Tab 2: Create
-                  Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      TextField(
-                        controller: _titleController,
-                        style: const TextStyle(fontSize: 14, color: Colors.white),
-                        decoration: InputDecoration(
-                          labelText: 'Convoy Name',
-                          labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
-                          filled: true,
-                          fillColor: Colors.white.withValues(alpha: 0.05),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      InkWell(
-                        onTap: () => setState(() => _addSimulatedBots = !_addSimulatedBots),
-                        borderRadius: BorderRadius.circular(8),
-                        child: Row(
-                          children: [
-                            Checkbox(
-                              value: _addSimulatedBots,
-                              onChanged: (v) => setState(() => _addSimulatedBots = v ?? true),
-                              activeColor: kAccentOrange,
-                              visualDensity: VisualDensity.compact,
+                  SingleChildScrollView(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        TextField(
+                          controller: _titleController,
+                          style: const TextStyle(fontSize: 14, color: Colors.white),
+                          decoration: InputDecoration(
+                            labelText: 'Convoy Name',
+                            labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
+                            filled: true,
+                            fillColor: Colors.white.withValues(alpha: 0.05),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
                             ),
-                            const Expanded(
-                              child: Text(
-                                'Add 3 simulated bots (test solo on 1 phone)',
-                                style: TextStyle(fontSize: 11, color: Colors.white70),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _destinationController,
+                          style: const TextStyle(fontSize: 14, color: Colors.white),
+                          decoration: InputDecoration(
+                            labelText: 'Destination (e.g. Hilltop Cafe / Lonavala)',
+                            labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
+                            prefixIcon: const Icon(Icons.flag, color: Color(0xFF3DDC97), size: 18),
+                            filled: true,
+                            fillColor: Colors.white.withValues(alpha: 0.05),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        InkWell(
+                          onTap: () => setState(() => _addSimulatedBots = !_addSimulatedBots),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Row(
+                            children: [
+                              Checkbox(
+                                value: _addSimulatedBots,
+                                onChanged: (v) => setState(() => _addSimulatedBots = v ?? true),
+                                activeColor: kAccentOrange,
+                                visualDensity: VisualDensity.compact,
                               ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: kAccentOrange,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              const Expanded(
+                                child: Text(
+                                  'Add 3 simulated bots (test solo on 1 phone)',
+                                  style: TextStyle(fontSize: 11, color: Colors.white70),
+                                ),
+                              ),
+                            ],
                           ),
-                          onPressed: _isLoading ? null : _handleCreateRide,
-                          child: _isLoading
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                )
-                              : const Text('Start Convoy', style: TextStyle(fontWeight: FontWeight.bold)),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: kAccentOrange,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            onPressed: _isLoading ? null : _handleCreateRide,
+                            child: _isLoading
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                  )
+                                : const Text('Start Convoy', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),

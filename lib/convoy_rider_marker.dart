@@ -14,10 +14,12 @@ class ConvoyRiderMarker extends StatelessWidget {
     super.key,
     required this.metric,
     required this.onTap,
+    this.isOffTrack = false,
   });
 
   final ConvoyMemberMetric metric;
   final VoidCallback onTap;
+  final bool isOffTrack;
 
   Color _statusColor(RiderStatus status) {
     switch (status) {
@@ -123,26 +125,36 @@ class ConvoyRiderMarker extends StatelessWidget {
             ],
           ),
 
-          // Status or Crash Banner below pin if not riding normally
-          if (member.status != RiderStatus.riding) ...[
+          // Status, Crash, or Off-Track Banner below pin
+          if (member.status != RiderStatus.riding || isOffTrack) ...[
             const SizedBox(height: 2),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: borderColor.withValues(alpha: 0.9),
+                color: isOffTrack && !isCrash ? const Color(0xFFFF4757) : borderColor.withValues(alpha: 0.9),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(_statusIcon(member.status), size: 10, color: Colors.black),
+                  Icon(
+                    isCrash
+                        ? Icons.warning_amber_rounded
+                        : isOffTrack
+                            ? Icons.alt_route
+                            : _statusIcon(member.status),
+                    size: 10,
+                    color: Colors.white,
+                  ),
                   const SizedBox(width: 3),
                   Text(
-                    member.status == RiderStatus.crashAlert
+                    isCrash
                         ? 'CRASH!'
-                        : member.status.name.toUpperCase(),
+                        : isOffTrack
+                            ? 'OFF TRACK'
+                            : member.status.name.toUpperCase(),
                     style: const TextStyle(
-                      color: Colors.black,
+                      color: Colors.white,
                       fontSize: 9,
                       fontWeight: FontWeight.w900,
                     ),
