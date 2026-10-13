@@ -10,7 +10,7 @@ This document tracks the step-by-step implementation of the SmartKavach Group Ri
 | :--- | :--- | :--- | :--- |
 | **Branch & Blueprint** | Created `feature/group-rides-cloud`, blueprint and tracker | **DONE** | Oct 13, 2026 |
 | **Milestone 1** | Convoy Models & Relative Geometry Engine (`convoy_calculator.dart`) | **DONE** | Oct 13, 2026 |
-| **Milestone 2** | Convoy Map Markers & "Ride Together" Roster Sheet | **IN PROGRESS** | — |
+| **Milestone 2** | Convoy Map Markers & "Ride Together" Roster Sheet | **DONE** | Oct 13, 2026 |
 | **Milestone 3** | Realtime Group Ride Service & WhatsApp Invite Generator | **QUEUED** | — |
 | **Milestone 4** | Google Sign-In & Cloud User Profile Integration | **QUEUED** | — |
 | **Milestone 5** | Group Emergency Mesh Alert (Crash auto-broadcast to all riders) | **QUEUED** | — |
@@ -30,13 +30,13 @@ This document tracks the step-by-step implementation of the SmartKavach Group Ri
 ---
 
 ### Milestone 2: Convoy Map Markers & "Ride Together" Sheet
-- [ ] Build custom convoy marker widgets for `flutter_map` with avatar and distance badge (`+470m`, `-350m`).
-- [ ] Build `lib/group_ride_sheet.dart` bottom sheet matching the reel design:
-  - [ ] Member list ordered by convoy position.
-  - [ ] Quick Call (`tel:`) and Directions (`geo:` / Google Maps) buttons.
-  - [ ] Rider status chips ("Riding", "Refueling", "Tea Break", "Emergency").
-  - [ ] WhatsApp Share button.
-- [ ] Create widget tests in `test/group_ride_sheet_test.dart`.
+- [x] Build custom convoy marker widgets for `flutter_map` with avatar and distance badge (`+470m`, `-350m`) in `lib/convoy_rider_marker.dart`.
+- [x] Build `lib/group_ride_sheet.dart` bottom sheet matching the reel design:
+  - [x] Member list ordered by convoy position.
+  - [x] Quick Call (`tel:`) and Directions (`geo:` / Google Maps) buttons.
+  - [x] Rider status chips ("Riding", "Refueling", "Tea Break", "Emergency").
+  - [x] WhatsApp Share button.
+- [x] Create widget tests in `test/group_ride_sheet_test.dart` (7/7 passing).
 
 ---
 
