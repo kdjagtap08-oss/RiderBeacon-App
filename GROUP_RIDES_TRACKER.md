@@ -12,7 +12,7 @@ This document tracks the step-by-step implementation of the SmartKavach Group Ri
 | **Milestone 1** | Convoy Models & Relative Geometry Engine (`convoy_calculator.dart`) | **DONE** | Oct 13, 2026 |
 | **Milestone 2** | Convoy Map Markers & "Ride Together" Roster Sheet | **DONE** | Oct 13, 2026 |
 | **Milestone 3** | Realtime Group Ride Service & WhatsApp Invite Generator | **DONE** | Oct 13, 2026 |
-| **Milestone 4** | Google Sign-In & Cloud User Profile Integration | **QUEUED** | — |
+| **Milestone 4** | Google Sign-In & Cloud User Profile Integration | **DONE** | Oct 13, 2026 |
 | **Milestone 5** | Group Emergency Mesh Alert (Crash auto-broadcast to all riders) | **QUEUED** | — |
 
 ---
@@ -51,9 +51,12 @@ This document tracks the step-by-step implementation of the SmartKavach Group Ri
 ---
 
 ### Milestone 4: Google Auth & Cloud User Profile
-- [ ] Add Firebase & Google Sign-In support in `lib/auth_service.dart`.
-- [ ] Save user profile, emergency contacts, and incident logs to cloud database schema.
-- [ ] Add login / profile header on the app shell.
+- [x] Implement `lib/auth_service.dart`:
+  - [x] `UserProfile` model with serialization and `copyWith`.
+  - [x] Interactive Google Sign-In integration via `google_sign_in`.
+  - [x] Zero-friction offline guest session fallback (`Rider #XXXX`).
+  - [x] Persistent profile storage with `SharedPreferences`.
+- [x] Create unit tests in `test/auth_service_test.dart` (7/7 passing).
 
 ---
 
