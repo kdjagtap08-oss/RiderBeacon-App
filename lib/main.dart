@@ -64,6 +64,7 @@ class Tracker extends ChangeNotifier {
   LatLng? pos;
   double speed = 0;
   String? error;
+  bool autoCenterOnUser = true;
 
   Future<void> start() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
@@ -86,10 +87,49 @@ class Tracker extends ChangeNotifier {
       pos = LatLng(f.latitude, f.longitude);
       speed = f.speed < 0 ? 0 : f.speed * 3.6; // m/s -> km/h
       notifyListeners();
-      try {
-        map.move(pos!, 17);
-      } catch (_) {}
+      if (autoCenterOnUser) {
+        try {
+          map.move(pos!, 17);
+        } catch (_) {}
+      }
     });
+  }
+
+  void centerOnUser({double zoom = 17}) {
+    autoCenterOnUser = true;
+    if (pos != null) {
+      try {
+        map.move(pos!, zoom);
+      } catch (_) {}
+    }
+    notifyListeners();
+  }
+
+  void moveToLocation(LatLng target, {double zoom = 17}) {
+    autoCenterOnUser = false;
+    try {
+      map.move(target, zoom);
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  void fitBounds(List<LatLng> points) {
+    if (points.isEmpty) return;
+    autoCenterOnUser = false;
+    if (points.length == 1) {
+      moveToLocation(points.first, zoom: 16);
+      return;
+    }
+    try {
+      final bounds = LatLngBounds.fromPoints(points);
+      map.fitCamera(
+        CameraFit.bounds(
+          bounds: bounds,
+          padding: const EdgeInsets.all(40),
+        ),
+      );
+    } catch (_) {}
+    notifyListeners();
   }
 
   @override
@@ -581,6 +621,16 @@ class HomePage extends StatelessWidget {
         onShareInvite: () => GroupRideService.shareInvite(ride),
         onNavigateToMember: (member) =>
             GroupRideService.openDirectionsTo(member.position),
+        onLocateMemberOnMap: (member) {
+          Navigator.of(context).pop();
+          t.moveToLocation(member.position, zoom: 16);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Focused on ${member.displayName} on map'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        },
       ),
     );
   }
@@ -787,59 +837,191 @@ class HomePage extends StatelessWidget {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(20),
                 child: SizedBox(
-                  height: 200,
-                  child: FlutterMap(
-                    mapController: t.map,
-                    options: const MapOptions(
-                        initialCenter: LatLng(20.5937, 78.9629),
-                        initialZoom: 4),
+                  height: 230,
+                  child: Stack(
                     children: [
-                      TileLayer(
-                        urlTemplate:
-                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'com.example.smartkavach',
+                      FlutterMap(
+                        mapController: t.map,
+                        options: MapOptions(
+                          initialCenter: t.pos ?? const LatLng(20.5937, 78.9629),
+                          initialZoom: t.pos != null ? 17 : 4,
+                          onPositionChanged: (camera, hasGesture) {
+                            if (hasGesture && t.autoCenterOnUser) {
+                              t.autoCenterOnUser = false;
+                            }
+                          },
+                        ),
+                        children: [
+                          TileLayer(
+                            urlTemplate:
+                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            userAgentPackageName: 'com.example.smartkavach',
+                          ),
+                          if (t.pos != null)
+                            MarkerLayer(markers: [
+                              Marker(
+                                point: t.pos!,
+                                width: 40,
+                                height: 40,
+                                child: const Icon(Icons.navigation,
+                                    color: kAccent, size: 36),
+                              ),
+                            ]),
+                          if (groupRide != null)
+                            StreamBuilder<List<ConvoyMemberMetric>>(
+                              stream: groupRide!.convoyMetricsStream,
+                              initialData: groupRide!.currentMetrics,
+                              builder: (context, snap) {
+                                final metrics = snap.data ?? [];
+                                final otherMembers =
+                                    metrics.where((m) => m.position != RelativePosition.here);
+                                if (otherMembers.isEmpty) return const SizedBox.shrink();
+
+                                return MarkerLayer(
+                                  markers: otherMembers
+                                      .map(
+                                        (m) => Marker(
+                                          point: m.member.position,
+                                          width: 90,
+                                          height: 52,
+                                          child: ConvoyRiderMarker(
+                                            metric: m,
+                                            onTap: () {
+                                              if (groupRide!.currentRide != null) {
+                                                _openGroupRideSheet(
+                                                    context, groupRide!.currentRide!);
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                );
+                              },
+                            ),
+                        ],
                       ),
-                      if (t.pos != null)
-                        MarkerLayer(markers: [
-                          Marker(
-                              point: t.pos!,
-                              width: 40,
-                              height: 40,
-                              child: const Icon(Icons.navigation,
-                                  color: kAccent, size: 36)),
-                        ]),
+
+                      // Off-screen Convoy Indicator / HUD overlay
                       if (groupRide != null)
                         StreamBuilder<List<ConvoyMemberMetric>>(
                           stream: groupRide!.convoyMetricsStream,
                           initialData: groupRide!.currentMetrics,
                           builder: (context, snap) {
                             final metrics = snap.data ?? [];
-                            final otherMembers =
-                                metrics.where((m) => m.position != RelativePosition.here);
-                            if (otherMembers.isEmpty) return const SizedBox.shrink();
+                            final other = metrics.where((m) => m.position != RelativePosition.here).toList();
+                            if (other.isEmpty) return const SizedBox.shrink();
 
-                            return MarkerLayer(
-                              markers: otherMembers
-                                  .map(
-                                    (m) => Marker(
-                                      point: m.member.position,
-                                      width: 90,
-                                      height: 52,
-                                      child: ConvoyRiderMarker(
-                                        metric: m,
-                                        onTap: () {
-                                          if (groupRide!.currentRide != null) {
-                                            _openGroupRideSheet(
-                                                context, groupRide!.currentRide!);
-                                          }
-                                        },
+                            final ahead = other.where((m) => m.position == RelativePosition.ahead).toList();
+                            final behind = other.where((m) => m.position == RelativePosition.behind).toList();
+
+                            return Positioned(
+                              top: 8,
+                              left: 10,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black87,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.white24, width: 0.8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (ahead.isNotEmpty) ...[
+                                      const Icon(Icons.arrow_upward, size: 12, color: Color(0xFF3DDC97)),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        '${ahead.length} Ahead (${ahead.first.formattedDistance})',
+                                        style: const TextStyle(fontSize: 10, color: Color(0xFF3DDC97), fontWeight: FontWeight.bold),
                                       ),
-                                    ),
-                                  )
-                                  .toList(),
+                                    ],
+                                    if (ahead.isNotEmpty && behind.isNotEmpty)
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 5),
+                                        child: Text('•', style: TextStyle(color: Colors.white38, fontSize: 10)),
+                                      ),
+                                    if (behind.isNotEmpty) ...[
+                                      const Icon(Icons.arrow_downward, size: 12, color: Color(0xFFFF6B2C)),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        '${behind.length} Behind (${behind.first.formattedDistance})',
+                                        style: const TextStyle(fontSize: 10, color: Color(0xFFFF6B2C), fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
                             );
                           },
                         ),
+
+                      // Floating Map Action Controls (Fit All Convoy / Recenter Me)
+                      Positioned(
+                        bottom: 8,
+                        right: 8,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (groupRide != null && groupRide!.currentRide != null)
+                              GestureDetector(
+                                onTap: () {
+                                  final allPoints = <LatLng>[];
+                                  if (t.pos != null) allPoints.add(t.pos!);
+                                  for (final m in groupRide!.currentMetrics) {
+                                    allPoints.add(m.member.position);
+                                  }
+                                  t.fitBounds(allPoints);
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1E2530),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: Colors.white24),
+                                  ),
+                                  child: const Row(
+                                    children: [
+                                      Icon(Icons.zoom_out_map, size: 13, color: Colors.white),
+                                      SizedBox(width: 4),
+                                      Text('Fit Convoy', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            GestureDetector(
+                              onTap: () => t.centerOnUser(zoom: 17),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: t.autoCenterOnUser ? const Color(0xFF3DDC97) : const Color(0xFF1E2530),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: Colors.white24),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.my_location,
+                                      size: 13,
+                                      color: t.autoCenterOnUser ? Colors.black : Colors.white,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Recenter',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: t.autoCenterOnUser ? Colors.black : Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),

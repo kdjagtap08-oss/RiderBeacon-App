@@ -163,15 +163,39 @@ class GroupRideService {
     }
   }
 
-  /// Opens Google Maps navigation directions to the specified target position.
+  /// Opens Google Maps / external turn-by-turn navigation directions to the specified target position.
   static Future<bool> openDirectionsTo(LatLng destination) async {
-    final uri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}',
+    final lat = destination.latitude;
+    final lng = destination.longitude;
+
+    // 1. Android Native turn-by-turn navigation intent
+    final googleNavUri = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
+    try {
+      if (await canLaunchUrl(googleNavUri)) {
+        return await launchUrl(googleNavUri, mode: LaunchMode.externalNonBrowserApplication);
+      }
+    } catch (_) {}
+
+    // 2. Generic Geo intent (opens any installed map application: Google Maps, OsmAnd, etc.)
+    final geoUri = Uri.parse('geo:$lat,$lng?q=$lat,$lng(Convoy+Rider)');
+    try {
+      if (await canLaunchUrl(geoUri)) {
+        return await launchUrl(geoUri, mode: LaunchMode.externalNonBrowserApplication);
+      }
+    } catch (_) {}
+
+    // 3. Fallback to HTTPS Google Maps directions URL (works in browser or Google Maps app)
+    final webMapsUri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
     );
-    if (await canLaunchUrl(uri)) {
-      return await launchUrl(uri, mode: LaunchMode.externalApplication);
+    try {
+      return await launchUrl(webMapsUri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (kDebugMode) {
+        print('Could not launch navigation: $e');
+      }
+      return false;
     }
-    return false;
   }
 
   /// Creates a new group ride and registers the creator as the convoy leader.

@@ -28,6 +28,7 @@ class GroupRideSheet extends StatefulWidget {
     required this.onStatusChanged,
     required this.onShareInvite,
     required this.onNavigateToMember,
+    this.onLocateMemberOnMap,
     this.convoyMetricsStream,
   });
 
@@ -37,6 +38,7 @@ class GroupRideSheet extends StatefulWidget {
   final ValueChanged<RiderStatus> onStatusChanged;
   final VoidCallback onShareInvite;
   final ValueChanged<RideMember> onNavigateToMember;
+  final ValueChanged<RideMember>? onLocateMemberOnMap;
   final Stream<List<ConvoyMemberMetric>>? convoyMetricsStream;
 
   @override
@@ -376,19 +378,28 @@ class _GroupRideSheetState extends State<GroupRideSheet> {
             ),
           ),
 
-          // Action Buttons: Call & Directions
+          // Action Buttons: Call, Show on Map & Turn-by-Turn Directions
           if (!isMe) ...[
             if (member.phoneNumber != null && member.phoneNumber!.isNotEmpty)
               IconButton(
                 icon: const Icon(Icons.call, size: 20, color: kGoodGreen),
                 tooltip: 'Call ${member.displayName}',
+                visualDensity: VisualDensity.compact,
                 onPressed: () {
                   FlutterPhoneDirectCaller.callNumber(member.phoneNumber!);
                 },
               ),
+            if (widget.onLocateMemberOnMap != null)
+              IconButton(
+                icon: const Icon(Icons.my_location, size: 20, color: Color(0xFF3498DB)),
+                tooltip: 'Locate ${member.displayName} on Map',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => widget.onLocateMemberOnMap!(member),
+              ),
             IconButton(
               icon: const Icon(Icons.navigation, size: 20, color: kAccentOrange),
               tooltip: 'Directions to ${member.displayName}',
+              visualDensity: VisualDensity.compact,
               onPressed: () => widget.onNavigateToMember(member),
             ),
           ],
