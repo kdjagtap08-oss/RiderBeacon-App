@@ -609,13 +609,42 @@ class _HomePageState extends State<HomePage> {
   final Map<String, List<LatLng>> _memberRoutes = {};
   final Map<String, LatLng> _memberRouteStartPos = {};
   final Set<String> _offTrackMembers = {};
+  final Set<String> _inFlightRouteRequests = {};
   String? _lastRouteRideCode;
   LatLng? _lastDestinationLocation;
+  StreamSubscription<GroupRide?>? _rideSub;
 
   @override
   void initState() {
     super.initState();
+    _rideSub = widget.groupRide?.rideStream.listen((_) {
+      if (mounted) {
+        _checkAndFetchRoutes();
+        setState(() {});
+      }
+    });
     _checkAndFetchRoutes();
+  }
+
+  @override
+  void didUpdateWidget(covariant HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.groupRide != widget.groupRide) {
+      _rideSub?.cancel();
+      _rideSub = widget.groupRide?.rideStream.listen((_) {
+        if (mounted) {
+          _checkAndFetchRoutes();
+          setState(() {});
+        }
+      });
+      _checkAndFetchRoutes();
+    }
+  }
+
+  @override
+  void dispose() {
+    _rideSub?.cancel();
+    super.dispose();
   }
 
   void _checkAndFetchRoutes() {
@@ -625,6 +654,7 @@ class _HomePageState extends State<HomePage> {
         _memberRoutes.clear();
         _memberRouteStartPos.clear();
         _offTrackMembers.clear();
+        _inFlightRouteRequests.clear();
         _lastDestinationLocation = null;
         _lastRouteRideCode = null;
       }
@@ -642,6 +672,7 @@ class _HomePageState extends State<HomePage> {
       _memberRoutes.clear();
       _memberRouteStartPos.clear();
       _offTrackMembers.clear();
+      _inFlightRouteRequests.clear();
       _lastDestinationLocation = dest;
       _lastRouteRideCode = rideCode;
     }
@@ -659,18 +690,22 @@ class _HomePageState extends State<HomePage> {
           destChanged ||
           (lastStart != null && ConvoyCalculator.distanceBetween(lastStart, startPos) > 250.0);
 
-      if (needsRecalculation) {
+      if (needsRecalculation && !_inFlightRouteRequests.contains(key)) {
+        _inFlightRouteRequests.add(key);
         _memberRouteStartPos[key] = startPos;
         ConvoyRouteService.fetchDrivingRoute(
           start: startPos,
           destination: dest,
         ).then((points) {
+          _inFlightRouteRequests.remove(key);
           if (mounted) {
             setState(() {
               _memberRoutes[key] = points;
               _evaluateOffTrack(key, startPos, points);
             });
           }
+        }).catchError((_) {
+          _inFlightRouteRequests.remove(key);
         });
       } else if (_memberRoutes.containsKey(key)) {
         // Re-evaluate off-track with current position
@@ -693,9 +728,9 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _openConvoyDialog(BuildContext context) {
+  Future<void> _openConvoyDialog(BuildContext context) async {
     if (widget.auth == null || widget.groupRide == null) return;
-    showDialog(
+    final joined = await showDialog<bool>(
       context: context,
       builder: (_) => ConvoyJoinDialog(
         authService: widget.auth!,
@@ -703,6 +738,16 @@ class _HomePageState extends State<HomePage> {
         currentLocation: widget.t.pos ?? const LatLng(19.0760, 72.8777),
       ),
     );
+
+    if (joined == true && mounted) {
+      setState(() {
+        _lastDestinationLocation = null;
+        _memberRoutes.clear();
+        _memberRouteStartPos.clear();
+        _inFlightRouteRequests.clear();
+      });
+      _checkAndFetchRoutes();
+    }
   }
 
   void _openGroupRideSheet(BuildContext context, GroupRide ride) {
