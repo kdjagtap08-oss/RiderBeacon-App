@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -11,6 +12,22 @@ const kGyroUuid = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
 class GyroFeed extends ChangeNotifier {
   List<double>? values; // [x, y, z], null when no data
   StreamSubscription? _sub;
+
+  double get angularVelocity {
+    final v = values;
+    if (v == null || v.length < 3) return 0.0;
+    return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+  }
+
+  /// Maximum absolute value across X, Y, or Z individual axes
+  double get maxAxisVelocity {
+    final v = values;
+    if (v == null || v.length < 3) return 0.0;
+    return math.max(v[0].abs(), math.max(v[1].abs(), v[2].abs()));
+  }
+
+  /// Highest rotation rate detected (either total 3D magnitude or peak single axis)
+  double get effectiveRotationRate => math.max(angularVelocity, maxAxisVelocity);
 
   /// Call once after the helmet is connected.
   Future<void> attach(BluetoothDevice d) async {

@@ -1,14 +1,20 @@
 import 'dart:async';
-import 'gyro.dart';
 import 'package:another_telephony/telephony.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'accident_alert_dialog.dart';
+import 'accident_detector.dart';
+import 'gyro.dart';
+import 'sos_settings_page.dart';
+
+export 'sos_settings_page.dart';
 
 const kBg = Color(0xFF0E1116);
 const kCard = Color(0xFF181D25);
@@ -47,6 +53,7 @@ class Tracker extends ChangeNotifier {
   LatLng? pos;
   double speed = 0;
   String? error;
+  void Function(double speed)? onSpeedChanged;
 
   Future<void> start() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
@@ -69,6 +76,7 @@ class Tracker extends ChangeNotifier {
       pos = LatLng(f.latitude, f.longitude);
       speed = f.speed < 0 ? 0 : f.speed * 3.6; // m/s -> km/h
       notifyListeners();
+      onSpeedChanged?.call(speed);
       try {
         map.move(pos!, 17);
       } catch (_) {}
@@ -89,7 +97,7 @@ class HelmetLink extends ChangeNotifier {
   bool scanning = false, connecting = false;
   BluetoothConnectionState state = BluetoothConnectionState.disconnected;
   StreamSubscription? _a, _b, _c;
-  final gyro = GyroFeed();   
+  final gyro = GyroFeed();
 
   HelmetLink() {
     _a = FlutterBluePlus.scanResults.listen((r) {
@@ -121,7 +129,7 @@ class HelmetLink extends ChangeNotifier {
       notifyListeners();
     });
     try {
-      await d.connect(license: License.free, timeout: const Duration(seconds: 10));
+      await d.connect(license: License.nonprofit, timeout: const Duration(seconds: 10));
       await gyro.attach(d);
     } catch (_) {
       device = null;
@@ -158,6 +166,12 @@ class _ShellState extends State<Shell> {
   final tracker = Tracker();
   final helmet = HelmetLink();
   final contacts = Contacts();
+  final settings = AccidentSettings();
+  late final detector = AccidentDetector(
+    settings: settings,
+    helmetGyro: helmet.gyro,
+  );
+
   int tab = 0;
 
   @override
@@ -165,10 +179,22 @@ class _ShellState extends State<Shell> {
     super.initState();
     tracker.start();
     contacts.load();
+    settings.load();
+
+    // Connect speed & position to accident detector
+    tracker.onSpeedChanged = (s) => detector.onSpeedUpdate(s);
+    detector.locationProvider = () => tracker.pos;
+    detector.contactsProvider = () => contacts.numbers;
+    detector.onStatusCallback = (msg) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      }
+    };
   }
 
   @override
   void dispose() {
+    detector.dispose();
     tracker.dispose();
     helmet.dispose();
     contacts.dispose();
@@ -176,27 +202,64 @@ class _ShellState extends State<Shell> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        body: SafeArea(
-          child: IndexedStack(index: tab, children: [
-            HomePage(
-                t: tracker,
-                h: helmet,
-                contacts: contacts,
-                openHelmet: () => setState(() => tab = 1)),
-            HelmetPage(h: helmet),
-          ]),
-        ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: tab,
-          onDestinationSelected: (i) => setState(() => tab = i),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.speed), label: 'Ride'),
-            NavigationDestination(
-                icon: Icon(Icons.sports_motorsports), label: 'Helmet'),
-          ],
-        ),
-      );
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: detector,
+      builder: (context, _) => Stack(
+        children: [
+          Scaffold(
+            body: SafeArea(
+              child: IndexedStack(index: tab, children: [
+                HomePage(
+                  t: tracker,
+                  h: helmet,
+                  contacts: contacts,
+                  detector: detector,
+                  openHelmet: () => setState(() => tab = 1),
+                ),
+                HelmetPage(h: helmet),
+              ]),
+            ),
+            bottomNavigationBar: NavigationBar(
+              selectedIndex: tab,
+              onDestinationSelected: (i) => setState(() => tab = i),
+              destinations: const [
+                NavigationDestination(icon: Icon(Icons.speed), label: 'Ride'),
+                NavigationDestination(
+                    icon: Icon(Icons.sports_motorsports), label: 'Helmet'),
+              ],
+            ),
+          ),
+
+          // High Priority Accident SOS Countdown Modal
+          if (detector.state == AccidentState.countdown)
+            Positioned.fill(
+              child: AccidentAlertModal(
+                detector: detector,
+                onCancel: () {
+                  detector.cancelAlarm();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Alarm cancelled. Safe riding!')),
+                  );
+                },
+                onDispatchNow: () {
+                  detector.dispatchEmergencyResponse(
+                    location: tracker.pos,
+                    emergencyContacts: contacts.numbers,
+                    onStatusUpdate: (msg) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(SnackBar(content: Text(msg)));
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class Panel extends StatelessWidget {
@@ -217,26 +280,25 @@ class Panel extends StatelessWidget {
 // ───────────────────────── Ride tab ─────────────────────────
 
 class HomePage extends StatelessWidget {
-  const HomePage(
-      {super.key,
-      required this.t,
-      required this.h,
-      required this.contacts,
-      required this.openHelmet});
+  const HomePage({
+    super.key,
+    required this.t,
+    required this.h,
+    required this.contacts,
+    required this.detector,
+    required this.openHelmet,
+  });
+
   final Tracker t;
   final HelmetLink h;
   final Contacts contacts;
+  final AccidentDetector detector;
   final VoidCallback openHelmet;
 
-  /// Manual SOS: 1) get location, 2) SMS all contacts, 3) call first contact.
+  /// Manual SOS: 1) get location, 2) check network, 3) SMS/call Police or contacts.
   Future<void> _sos(BuildContext c) async {
     HapticFeedback.heavyImpact();
     final msg = ScaffoldMessenger.of(c);
-    if (contacts.numbers.isEmpty) {
-      msg.showSnackBar(const SnackBar(
-          content: Text('Add an emergency contact in SOS settings first')));
-      return;
-    }
 
     // 1) Location: last GPS fix, or try to get a fresh one.
     LatLng? here = t.pos;
@@ -244,16 +306,21 @@ class HomePage extends StatelessWidget {
       try {
         final p = await Geolocator.getCurrentPosition(
             locationSettings:
-                const LocationSettings(timeLimit: Duration(seconds: 8)));
+                const LocationSettings(timeLimit: Duration(seconds: 5)));
         here = LatLng(p.latitude, p.longitude);
       } catch (_) {}
     }
-        final where = here == null
-        ? 'Location unavailable.'
-        : 'My location: ${here.latitude.toStringAsFixed(5)}, ${here.longitude.toStringAsFixed(5)}';
-    final text = 'SOS! I need help. $where';
 
-    // 2) SMS to every contact (sent silently, no messaging app opens).
+    final where = here == null
+        ? 'Location unavailable.'
+        : 'Location: https://maps.google.com/?q=${here.latitude.toStringAsFixed(5)},${here.longitude.toStringAsFixed(5)}';
+
+    // 2) Check network
+    final hasNet = await detector.checkInternetNetwork();
+    final policeNum = detector.settings.policeNumber;
+    final text = 'SOS! I need urgent help! $where ${!hasNet ? "No network available. Alerting Police ($policeNum)." : ""}';
+
+    // 3) SMS to contacts
     final sms = Telephony.instance;
     if (await sms.requestSmsPermissions ?? false) {
       for (final n in contacts.numbers) {
@@ -261,26 +328,70 @@ class HomePage extends StatelessWidget {
           await sms.sendSms(to: n, message: text);
         } catch (_) {}
       }
-      msg.showSnackBar(SnackBar(
-          content: Text('SOS sent to ${contacts.numbers.length} contact(s)')));
-    } else {
-      msg.showSnackBar(
-          const SnackBar(content: Text('SMS permission denied, calling only')));
+      if (contacts.numbers.isNotEmpty) {
+        msg.showSnackBar(SnackBar(
+            content: Text('SOS text sent to ${contacts.numbers.length} contact(s)')));
+      }
     }
 
-    // 3) Call the first contact.
-    await FlutterPhoneDirectCaller.callNumber(contacts.numbers.first);
+    // 4) Calling routing: If no network -> Call Police 100!
+    if (!hasNet && detector.settings.callPoliceOnNoNetwork) {
+      msg.showSnackBar(SnackBar(
+          content: Text('No network detected. Calling Police ($policeNum)...')));
+      await FlutterPhoneDirectCaller.callNumber(policeNum);
+    } else if (contacts.numbers.isNotEmpty) {
+      await FlutterPhoneDirectCaller.callNumber(contacts.numbers.first);
+    } else {
+      msg.showSnackBar(SnackBar(
+          content: Text('No contacts configured. Calling Police ($policeNum)...')));
+      await FlutterPhoneDirectCaller.callNumber(policeNum);
+    }
   }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([t, h, contacts]),
+        listenable: Listenable.merge([t, h, contacts, detector, detector.settings]),
         builder: (context, _) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
             Row(children: [
               const Text('SmartKavach',
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+              const Spacer(),
+              // Network indicator pill
+              FutureBuilder<bool>(
+                future: detector.checkInternetNetwork(),
+                builder: (context, snapshot) {
+                  final online = snapshot.data ?? true;
+                  return Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: online
+                          ? kGood.withValues(alpha: 0.15)
+                          : kSos.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(online ? Icons.wifi : Icons.signal_cellular_connected_no_internet_4_bar,
+                            size: 13,
+                            color: online ? kGood : kSos),
+                        const SizedBox(width: 5),
+                        Text(
+                          online ? 'ONLINE' : 'OFFLINE',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: online ? kGood : kSos,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
             ]),
             const SizedBox(height: 12),
             Row(children: [
@@ -305,7 +416,10 @@ class HomePage extends StatelessWidget {
               InkWell(
                 borderRadius: BorderRadius.circular(20),
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => SosSettingsPage(contacts: contacts))),
+                    builder: (_) => SosSettingsPage(
+                          contacts: contacts,
+                          detector: detector,
+                        ))),
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -320,6 +434,8 @@ class HomePage extends StatelessWidget {
               ),
             ]),
             const SizedBox(height: 16),
+
+            // Speedometer Panel
             Panel(
               child: Column(children: [
                 SizedBox(
@@ -355,12 +471,14 @@ class HomePage extends StatelessWidget {
               ]),
             ),
             const SizedBox(height: 16),
+
+            // Map Panel
             Panel(
               pad: EdgeInsets.zero,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(20),
                 child: SizedBox(
-                  height: 200,
+                  height: 180,
                   child: FlutterMap(
                     mapController: t.map,
                     options: const MapOptions(
@@ -386,9 +504,119 @@ class HomePage extends StatelessWidget {
                 ),
               ),
             ),
-                const SizedBox(height: 16),
-                GyroPanel(g: h.gyro),
-                const SizedBox(height: 20),
+            const SizedBox(height: 16),
+
+            // 🛡️ ACCIDENT DETECTION SHIELD & STATUS CARD
+            Panel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        detector.settings.enabled
+                            ? Icons.security
+                            : Icons.security_outlined,
+                        color: detector.settings.enabled ? kGood : Colors.white38,
+                        size: 22,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Accident Shield',
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700),
+                      ),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: detector.settings.enabled
+                              ? kGood.withValues(alpha: 0.2)
+                              : Colors.white10,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          detector.settings.enabled ? 'ACTIVE' : 'DISABLED',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: detector.settings.enabled
+                                ? kGood
+                                : Colors.white38,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Automatically detects abnormal deceleration drops & gyroscope angular flips. If offline, directly calls Police 100.',
+                    style: TextStyle(color: Colors.white60, fontSize: 12),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Real-time Sensor Telemetry Bar
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _sensorStat(
+                          'Decel / Speed',
+                          '${t.speed.toStringAsFixed(0)} km/h',
+                          Icons.speed,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _sensorStat(
+                          'Gyro (Limit ${detector.settings.gyroThreshold.toStringAsFixed(0)})',
+                          '${(h.connected ? h.gyro.effectiveRotationRate : detector.lastPhoneGyroDeg).toStringAsFixed(0)}°/s',
+                          Icons.threed_rotation,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _sensorStat(
+                          'Impact G',
+                          '${detector.lastPhoneGForce.toStringAsFixed(1)}G',
+                          Icons.electric_bolt,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Simulation / Test Trigger Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        detector.triggerCrashAlarm(
+                          reason: 'Manual Accident Test Simulation (Safe Mode)',
+                        );
+                      },
+                      icon: const Icon(Icons.ring_volume, size: 18),
+                      label: const Text('Test Crash Alarm & Countdown'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: kAccent,
+                        side: const BorderSide(color: kAccent),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Gyroscope Panel
+            GyroPanel(g: h.gyro),
+            const SizedBox(height: 20),
+
+            // Big Manual SOS Button
             GestureDetector(
               onLongPress: () => _sos(context),
               child: Container(
@@ -398,7 +626,8 @@ class HomePage extends StatelessWidget {
                   color: kSos,
                   borderRadius: BorderRadius.circular(38),
                   boxShadow: [
-                    BoxShadow(color: kSos.withOpacity(0.4), blurRadius: 24)
+                    BoxShadow(
+                        color: kSos.withValues(alpha: 0.4), blurRadius: 24)
                   ],
                 ),
                 child: const Row(mainAxisSize: MainAxisSize.min, children: [
@@ -411,6 +640,37 @@ class HomePage extends StatelessWidget {
                           letterSpacing: 1)),
                 ]),
               ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _sensorStat(String label, String value, IconData icon) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 13, color: kAccent),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    label,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 10, color: Colors.white54),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
             ),
           ],
         ),
@@ -444,7 +704,7 @@ class HelmetPage extends StatelessWidget {
                   CircleAvatar(
                     radius: 36,
                     backgroundColor:
-                        (h.connected ? kGood : Colors.white24).withOpacity(0.2),
+                        (h.connected ? kGood : Colors.white24).withValues(alpha: 0.2),
                     child: Icon(Icons.sports_motorsports,
                         size: 36, color: h.connected ? kGood : Colors.white54),
                   ),
@@ -548,7 +808,6 @@ class HelmetPage extends StatelessWidget {
       );
 }
 
-
 // ───────────────────────── SOS settings ─────────────────────────
 
 /// Emergency numbers, saved on the phone.
@@ -577,114 +836,4 @@ class Contacts extends ChangeNotifier {
     numbers = numbers.where((x) => x != n).toList();
     return _save();
   }
-}
-
-class SosSettingsPage extends StatefulWidget {
-  const SosSettingsPage({super.key, required this.contacts});
-  final Contacts contacts;
-
-  @override
-  State<SosSettingsPage> createState() => _SosSettingsPageState();
-}
-
-class _SosSettingsPageState extends State<SosSettingsPage> {
-  final _ctrl = TextEditingController();
-  String? _err;
-
-  Future<void> _add() async {
-    final n = _ctrl.text.replaceAll(RegExp(r'[^0-9+]'), '');
-    final c = widget.contacts;
-    if (n.replaceAll('+', '').length < 7) {
-      return setState(() => _err = 'Enter a valid phone number');
-    }
-    if (c.numbers.contains(n)) return setState(() => _err = 'Already added');
-    if (c.numbers.length >= 3) {
-      return setState(() => _err = 'Maximum 3 contacts');
-    }
-    await c.add(n);
-    _ctrl.clear();
-    setState(() => _err = null);
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('SOS settings'), backgroundColor: kBg),
-        body: ListenableBuilder(
-          listenable: widget.contacts,
-          builder: (context, _) => ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              const Panel(
-                child: Text(
-                    'When you hold the SOS button, the app texts your live location to all contacts and calls the first one. Add up to 3 numbers.',
-                    style: TextStyle(color: Colors.white70)),
-              ),
-              const SizedBox(height: 16),
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(
-                  child: TextField(
-                    controller: _ctrl,
-                    keyboardType: TextInputType.phone,
-                    decoration: InputDecoration(
-                      labelText: 'Emergency contact number',
-                      errorText: _err,
-                      filled: true,
-                      fillColor: kCard,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide.none),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                    onPressed: _add,
-                    icon: const Icon(Icons.add),
-                    style: IconButton.styleFrom(minimumSize: const Size(56, 56))),
-              ]),
-              const SizedBox(height: 16),
-              if (widget.contacts.numbers.isEmpty)
-                const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(
-                        child: Text('No contacts yet',
-                            style: TextStyle(color: Colors.white38)))),
-              for (var i = 0; i < widget.contacts.numbers.length; i++)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Panel(
-                    pad: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    child: Row(children: [
-                      const Icon(Icons.phone, color: kAccent),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(widget.contacts.numbers[i],
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w600)),
-                              if (i == 0)
-                                const Text('Called first',
-                                    style: TextStyle(
-                                        color: Colors.white54, fontSize: 12)),
-                            ]),
-                      ),
-                      IconButton(
-                          onPressed: () =>
-                              widget.contacts.remove(widget.contacts.numbers[i]),
-                          icon: const Icon(Icons.delete_outline)),
-                    ]),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      );
 }
