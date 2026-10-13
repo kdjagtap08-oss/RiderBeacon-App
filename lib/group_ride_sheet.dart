@@ -118,6 +118,8 @@ class _GroupRideSheetState extends State<GroupRideSheet> {
                           fontSize: 12,
                           color: Colors.white60,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -127,7 +129,7 @@ class _GroupRideSheetState extends State<GroupRideSheet> {
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF25D366), // WhatsApp green
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     visualDensity: VisualDensity.compact,
                   ),
                   icon: const Icon(Icons.share, size: 14),
@@ -147,7 +149,7 @@ class _GroupRideSheetState extends State<GroupRideSheet> {
               color: Colors.white.withValues(alpha: 0.04),
               child: Row(
                 children: [
-                  const Icon(Icons.location_on, size: 16, color: Color(0xFF3DDC97)),
+                  const Icon(Icons.location_on, size: 16, color: Color(0xFFE5323B)),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -155,6 +157,7 @@ class _GroupRideSheetState extends State<GroupRideSheet> {
                           ? 'Destination: ${widget.ride.destinationName}'
                           : 'No destination set',
                       style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600),
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -298,15 +301,6 @@ class _GroupRideSheetState extends State<GroupRideSheet> {
     final isMe = member.userId == widget.currentUserId;
     final isCrash = member.status == RiderStatus.crashAlert;
 
-    final statusColor = switch (member.status) {
-      RiderStatus.riding => Colors.white54,
-      RiderStatus.refueling => kRefuelYellow,
-      RiderStatus.teaBreak => kGoodGreen,
-      RiderStatus.mechanicalIssue => kAccentOrange,
-      RiderStatus.stopped => Colors.white38,
-      RiderStatus.crashAlert => kSosRed,
-    };
-
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -372,6 +366,7 @@ class _GroupRideSheetState extends State<GroupRideSheet> {
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                         ),
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -392,33 +387,19 @@ class _GroupRideSheetState extends State<GroupRideSheet> {
                   ],
                 ),
                 const SizedBox(height: 3),
-                Row(
-                  children: [
-                    Text(
-                      metric.formattedDistance,
-                      style: TextStyle(
-                        color: metric.position == RelativePosition.ahead
-                            ? kGoodGreen
-                            : Colors.white70,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (member.status != RiderStatus.riding) ...[
-                      const Text(' • ', style: TextStyle(color: Colors.white38)),
-                      Text(
-                        member.status.name,
-                        style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.w500),
-                      ),
-                    ],
-                    if (member.speedKmh > 5.0) ...[
-                      const Text(' • ', style: TextStyle(color: Colors.white38)),
-                      Text(
-                        '${member.speedKmh.toStringAsFixed(0)} km/h',
-                        style: const TextStyle(color: Colors.white38, fontSize: 11),
-                      ),
-                    ],
-                  ],
+                Text(
+                  [
+                    metric.formattedDistance,
+                    if (member.status != RiderStatus.riding) member.status.name,
+                    if (member.speedKmh > 5.0) '${member.speedKmh.toStringAsFixed(0)} km/h',
+                  ].join(' • '),
+                  style: TextStyle(
+                    color: metric.position == RelativePosition.ahead ? kGoodGreen : Colors.white70,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
@@ -428,24 +409,30 @@ class _GroupRideSheetState extends State<GroupRideSheet> {
           if (!isMe) ...[
             if (member.phoneNumber != null && member.phoneNumber!.isNotEmpty)
               IconButton(
-                icon: const Icon(Icons.call, size: 20, color: kGoodGreen),
+                icon: const Icon(Icons.call, size: 18, color: kGoodGreen),
                 tooltip: 'Call ${member.displayName}',
                 visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: EdgeInsets.zero,
                 onPressed: () {
                   FlutterPhoneDirectCaller.callNumber(member.phoneNumber!);
                 },
               ),
             if (widget.onLocateMemberOnMap != null)
               IconButton(
-                icon: const Icon(Icons.my_location, size: 20, color: Color(0xFF3498DB)),
+                icon: const Icon(Icons.my_location, size: 18, color: Color(0xFF3498DB)),
                 tooltip: 'Locate ${member.displayName} on Map',
                 visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: EdgeInsets.zero,
                 onPressed: () => widget.onLocateMemberOnMap!(member),
               ),
             IconButton(
-              icon: const Icon(Icons.navigation, size: 20, color: kAccentOrange),
+              icon: const Icon(Icons.navigation, size: 18, color: kAccentOrange),
               tooltip: 'Directions to ${member.displayName}',
               visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              padding: EdgeInsets.zero,
               onPressed: () => widget.onNavigateToMember(member),
             ),
           ],

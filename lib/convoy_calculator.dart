@@ -31,6 +31,10 @@ class ConvoyMemberMetric {
 class ConvoyCalculator {
   static const Distance _distance = Distance();
 
+  /// Calculates geodesic distance between two points in meters.
+  static double distanceBetween(LatLng p1, LatLng p2) =>
+      _distance.as(LengthUnit.Meter, p1, p2);
+
   /// Calculates the initial forward azimuth/bearing (in degrees 0..360) from [p1] to [p2].
   static double calculateBearing(LatLng p1, LatLng p2) {
     final lat1 = p1.latitude * math.pi / 180.0;

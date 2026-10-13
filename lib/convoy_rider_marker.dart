@@ -120,6 +120,8 @@ class ConvoyRiderMarker extends StatelessWidget {
                       fontSize: 11,
                       fontWeight: FontWeight.w800,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
             ],
@@ -129,6 +131,7 @@ class ConvoyRiderMarker extends StatelessWidget {
           if (member.status != RiderStatus.riding || isOffTrack) ...[
             const SizedBox(height: 2),
             Container(
+              constraints: const BoxConstraints(maxWidth: 90),
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                 color: isOffTrack && !isCrash ? const Color(0xFFFF4757) : borderColor.withValues(alpha: 0.9),
@@ -147,16 +150,20 @@ class ConvoyRiderMarker extends StatelessWidget {
                     color: Colors.white,
                   ),
                   const SizedBox(width: 3),
-                  Text(
-                    isCrash
-                        ? 'CRASH!'
-                        : isOffTrack
-                            ? 'OFF TRACK'
-                            : member.status.name.toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
+                  Flexible(
+                    child: Text(
+                      isCrash
+                          ? 'CRASH!'
+                          : isOffTrack
+                              ? 'OFF TRACK'
+                              : member.status.name.toUpperCase(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],

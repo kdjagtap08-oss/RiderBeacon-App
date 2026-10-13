@@ -607,8 +607,10 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final Map<String, List<LatLng>> _memberRoutes = {};
+  final Map<String, LatLng> _memberRouteStartPos = {};
   final Set<String> _offTrackMembers = {};
   String? _lastRouteRideCode;
+  LatLng? _lastDestinationLocation;
 
   @override
   void initState() {
@@ -619,40 +621,63 @@ class _HomePageState extends State<HomePage> {
   void _checkAndFetchRoutes() {
     final ride = widget.groupRide?.currentRide;
     if (ride == null || ride.destinationLocation == null) {
-      if (_memberRoutes.isNotEmpty) {
-        setState(() {
-          _memberRoutes.clear();
-          _offTrackMembers.clear();
-        });
+      if (_memberRoutes.isNotEmpty || _lastDestinationLocation != null) {
+        _memberRoutes.clear();
+        _memberRouteStartPos.clear();
+        _offTrackMembers.clear();
+        _lastDestinationLocation = null;
+        _lastRouteRideCode = null;
       }
       return;
     }
 
     final dest = ride.destinationLocation!;
     final rideCode = ride.rideCode;
+    final destChanged = _lastDestinationLocation == null ||
+        _lastDestinationLocation!.latitude != dest.latitude ||
+        _lastDestinationLocation!.longitude != dest.longitude ||
+        _lastRouteRideCode != rideCode;
+
+    if (destChanged) {
+      _memberRoutes.clear();
+      _memberRouteStartPos.clear();
+      _offTrackMembers.clear();
+      _lastDestinationLocation = dest;
+      _lastRouteRideCode = rideCode;
+    }
+
+    final myId = widget.auth?.currentUser?.id ?? widget.groupRide?.currentUserId;
 
     // Fetch route for each member
     for (final member in ride.members.values) {
       final key = member.userId;
-      if (!_memberRoutes.containsKey(key) || _lastRouteRideCode != rideCode) {
+      final isMe = key == myId;
+      final startPos = (isMe && widget.t.pos != null) ? widget.t.pos! : member.position;
+
+      final lastStart = _memberRouteStartPos[key];
+      final needsRecalculation = !_memberRoutes.containsKey(key) ||
+          destChanged ||
+          (lastStart != null && ConvoyCalculator.distanceBetween(lastStart, startPos) > 250.0);
+
+      if (needsRecalculation) {
+        _memberRouteStartPos[key] = startPos;
         ConvoyRouteService.fetchDrivingRoute(
-          start: member.position,
+          start: startPos,
           destination: dest,
         ).then((points) {
           if (mounted) {
             setState(() {
               _memberRoutes[key] = points;
-              _evaluateOffTrack(key, member.position, points);
+              _evaluateOffTrack(key, startPos, points);
             });
           }
         });
-      } else {
-        // Re-evaluate off-track
+      } else if (_memberRoutes.containsKey(key)) {
+        // Re-evaluate off-track with current position
         final points = _memberRoutes[key]!;
-        _evaluateOffTrack(key, member.position, points);
+        _evaluateOffTrack(key, startPos, points);
       }
     }
-    _lastRouteRideCode = rideCode;
   }
 
   void _evaluateOffTrack(String userId, LatLng position, List<LatLng> routePoints) {
@@ -727,25 +752,27 @@ class _HomePageState extends State<HomePage> {
             Text('Set Convoy Destination', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              style: const TextStyle(fontSize: 14, color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'e.g. Pune Railway Station / Lonavala',
-                hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
-                filled: true,
-                fillColor: Colors.white.withValues(alpha: 0.05),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                style: const TextStyle(fontSize: 14, color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'e.g. Pune Railway Station / Lonavala',
+                  hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+                  filled: true,
+                  fillColor: Colors.white.withValues(alpha: 0.05),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -765,7 +792,14 @@ class _HomePageState extends State<HomePage> {
                   destinationName: null,
                   destinationLocation: null,
                 );
-                setState(() => _memberRoutes.clear());
+                if (mounted) {
+                  setState(() {
+                    _memberRoutes.clear();
+                    _memberRouteStartPos.clear();
+                    _offTrackMembers.clear();
+                    _lastDestinationLocation = null;
+                  });
+                }
               } else {
                 final loc = await ConvoyRouteService.geocodeAddress(
                   newName,
@@ -775,6 +809,11 @@ class _HomePageState extends State<HomePage> {
                   destinationName: newName,
                   destinationLocation: loc,
                 );
+                if (mounted) {
+                  setState(() {
+                    _lastDestinationLocation = null; // Forces immediate route re-calculation
+                  });
+                }
                 _checkAndFetchRoutes();
               }
               if (mounted) {
@@ -940,6 +979,8 @@ class _HomePageState extends State<HomePage> {
                                 Text(
                                   'Code: ${activeRide.rideCode} • ${activeRide.members.length} Riders in Convoy${activeRide.destinationName != null ? " • To: ${activeRide.destinationName}" : ""}',
                                   style: const TextStyle(fontSize: 11, color: kGood, fontWeight: FontWeight.w600),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ],
                             ),
@@ -1025,27 +1066,37 @@ class _HomePageState extends State<HomePage> {
                                 final isMe = entry.key == (widget.auth?.currentUser?.id ?? widget.groupRide?.currentUserId);
                                 final isOffTrack = _offTrackMembers.contains(entry.key);
                                 final color = isOffTrack
-                                    ? const Color(0xFFFF4757).withValues(alpha: 0.8)
+                                    ? const Color(0xFFFF4757).withValues(alpha: 0.85)
                                     : isMe
-                                        ? const Color(0xFF3DDC97).withValues(alpha: 0.85)
-                                        : const Color(0xFF3498DB).withValues(alpha: 0.6);
+                                        ? const Color(0xFF2979FF).withValues(alpha: 0.9)
+                                        : const Color(0xFF00D2D3).withValues(alpha: 0.65);
+
+                                final points = List<LatLng>.from(entry.value);
+                                if (isMe && widget.t.pos != null && points.isNotEmpty) {
+                                  points[0] = widget.t.pos!;
+                                }
+                                final destLoc = widget.groupRide?.currentRide?.destinationLocation;
+                                if (destLoc != null && points.isNotEmpty) {
+                                  points[points.length - 1] = destLoc;
+                                }
+
                                 return Polyline(
-                                  points: entry.value,
-                                  strokeWidth: isMe ? 4.5 : 3.0,
+                                  points: points,
+                                  strokeWidth: isMe ? 5.0 : 3.5,
                                   color: color,
                                 );
                               }).toList(),
                             ),
 
-                          // Final Destination Pin (Compact map pin style with label)
+                          // Final Destination Pin (Sleek red map pin style with label pill)
                           if (widget.groupRide?.currentRide?.destinationLocation != null)
                             MarkerLayer(
                               markers: [
                                 Marker(
                                   point: widget.groupRide!.currentRide!.destinationLocation!,
-                                  width: 110,
-                                  height: 52,
-                                  alignment: Alignment.topCenter,
+                                  width: 140,
+                                  height: 60,
+                                  alignment: Alignment.center,
                                   child: FittedBox(
                                     fit: BoxFit.scaleDown,
                                     alignment: Alignment.center,
@@ -1053,28 +1104,44 @@ class _HomePageState extends State<HomePage> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          constraints: const BoxConstraints(maxWidth: 120),
+                                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                                           decoration: BoxDecoration(
-                                            color: Colors.black.withValues(alpha: 0.85),
-                                            borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: const Color(0xFF3DDC97), width: 1.2),
+                                            color: const Color(0xFFE5323B),
+                                            borderRadius: BorderRadius.circular(10),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withValues(alpha: 0.4),
+                                                blurRadius: 4,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ],
                                           ),
-                                          child: Text(
-                                            widget.groupRide!.currentRide!.destinationName ?? 'Destination',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(Icons.flag_rounded, size: 11, color: Colors.white),
+                                              const SizedBox(width: 4),
+                                              Flexible(
+                                                child: Text(
+                                                  widget.groupRide!.currentRide!.destinationName ?? 'Destination',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
                                         const SizedBox(height: 2),
                                         const Icon(
                                           Icons.location_on,
-                                          size: 26,
-                                          color: Color(0xFF3DDC97),
+                                          size: 28,
+                                          color: Color(0xFFE5323B),
                                         ),
                                       ],
                                     ),
@@ -1108,8 +1175,8 @@ class _HomePageState extends State<HomePage> {
                                       .map(
                                         (m) => Marker(
                                           point: m.member.position,
-                                          width: 120,
-                                          height: 70,
+                                          width: 130,
+                                          height: 75,
                                           alignment: Alignment.center,
                                           child: FittedBox(
                                             fit: BoxFit.scaleDown,
