@@ -9,8 +9,8 @@ This document tracks the step-by-step implementation of the SmartKavach Group Ri
 | Phase | Description | Status | Completion Date |
 | :--- | :--- | :--- | :--- |
 | **Branch & Blueprint** | Created `feature/group-rides-cloud`, blueprint and tracker | **DONE** | Oct 13, 2026 |
-| **Milestone 1** | Convoy Models & Relative Geometry Engine (`convoy_calculator.dart`) | **IN PROGRESS** | — |
-| **Milestone 2** | Convoy Map Markers & "Ride Together" Roster Sheet | **QUEUED** | — |
+| **Milestone 1** | Convoy Models & Relative Geometry Engine (`convoy_calculator.dart`) | **DONE** | Oct 13, 2026 |
+| **Milestone 2** | Convoy Map Markers & "Ride Together" Roster Sheet | **IN PROGRESS** | — |
 | **Milestone 3** | Realtime Group Ride Service & WhatsApp Invite Generator | **QUEUED** | — |
 | **Milestone 4** | Google Sign-In & Cloud User Profile Integration | **QUEUED** | — |
 | **Milestone 5** | Group Emergency Mesh Alert (Crash auto-broadcast to all riders) | **QUEUED** | — |
@@ -20,12 +20,12 @@ This document tracks the step-by-step implementation of the SmartKavach Group Ri
 ## Detailed Task Checklist
 
 ### Milestone 1: Convoy Models & Relative Geometry Engine
-- [ ] Create `lib/group_ride_model.dart` with `GroupRide`, `RideMember`, `RiderStatus`.
-- [ ] Implement `lib/convoy_calculator.dart`:
-  - [ ] Geodesic distance calculation via `latlong2`.
-  - [ ] Relative position classifier (ahead vs. behind based on heading/bearing).
-  - [ ] Convoy sort order along route line.
-- [ ] Create unit tests in `test/convoy_calculator_test.dart`.
+- [x] Create `lib/group_ride_model.dart` with `GroupRide`, `RideMember`, `RiderStatus`.
+- [x] Implement `lib/convoy_calculator.dart`:
+  - [x] Geodesic distance calculation via `latlong2`.
+  - [x] Relative position classifier (ahead vs. behind based on heading/bearing).
+  - [x] Convoy sort order along route line.
+- [x] Create unit tests in `test/convoy_calculator_test.dart` (5/5 passing).
 
 ---
 
