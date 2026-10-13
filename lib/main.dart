@@ -886,16 +886,21 @@ class HomePage extends StatelessWidget {
                                       .map(
                                         (m) => Marker(
                                           point: m.member.position,
-                                          width: 90,
-                                          height: 52,
-                                          child: ConvoyRiderMarker(
-                                            metric: m,
-                                            onTap: () {
-                                              if (groupRide!.currentRide != null) {
-                                                _openGroupRideSheet(
-                                                    context, groupRide!.currentRide!);
-                                              }
-                                            },
+                                          width: 120,
+                                          height: 70,
+                                          alignment: Alignment.center,
+                                          child: FittedBox(
+                                            fit: BoxFit.scaleDown,
+                                            alignment: Alignment.center,
+                                            child: ConvoyRiderMarker(
+                                              metric: m,
+                                              onTap: () {
+                                                if (groupRide!.currentRide != null) {
+                                                  _openGroupRideSheet(
+                                                      context, groupRide!.currentRide!);
+                                                }
+                                              },
+                                            ),
                                           ),
                                         ),
                                       )
