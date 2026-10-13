@@ -705,6 +705,90 @@ class _HomePageState extends State<HomePage> {
             ),
           );
         },
+        onEditDestination: () {
+          Navigator.of(context).pop();
+          _showEditDestinationDialog(ride);
+        },
+      ),
+    );
+  }
+
+  void _showEditDestinationDialog(GroupRide ride) {
+    final controller = TextEditingController(text: ride.destinationName ?? '');
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF181D25),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.edit_location_alt, color: Color(0xFFFF6B2C), size: 22),
+            SizedBox(width: 8),
+            Text('Set Convoy Destination', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              style: const TextStyle(fontSize: 14, color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'e.g. Pune Railway Station / Lonavala',
+                hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+                filled: true,
+                fillColor: Colors.white.withValues(alpha: 0.05),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B2C),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              final newName = controller.text.trim();
+              Navigator.of(dialogCtx).pop();
+              if (newName.isEmpty) {
+                await widget.groupRide?.updateDestination(
+                  destinationName: null,
+                  destinationLocation: null,
+                );
+                setState(() => _memberRoutes.clear());
+              } else {
+                final loc = await ConvoyRouteService.geocodeAddress(
+                  newName,
+                  nearLocation: widget.t.pos,
+                );
+                await widget.groupRide?.updateDestination(
+                  destinationName: newName,
+                  destinationLocation: loc,
+                );
+                _checkAndFetchRoutes();
+              }
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(newName.isEmpty ? 'Destination cleared' : 'Destination updated to $newName'),
+                    backgroundColor: const Color(0xFF3DDC97),
+                  ),
+                );
+              }
+            },
+            child: const Text('Save Destination', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }
@@ -953,35 +1037,44 @@ class _HomePageState extends State<HomePage> {
                               }).toList(),
                             ),
 
-                          // Final Destination Pin
+                          // Final Destination Pin (Compact map pin style with label)
                           if (widget.groupRide?.currentRide?.destinationLocation != null)
                             MarkerLayer(
                               markers: [
                                 Marker(
                                   point: widget.groupRide!.currentRide!.destinationLocation!,
-                                  width: 80,
-                                  height: 40,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF1E2530),
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: const Color(0xFF3DDC97), width: 1.5),
-                                    ),
-                                    child: Row(
+                                  width: 110,
+                                  height: 52,
+                                  alignment: Alignment.topCenter,
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    alignment: Alignment.center,
+                                    child: Column(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        const Icon(Icons.flag, size: 14, color: Color(0xFF3DDC97)),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          widget.groupRide!.currentRide!.destinationName ?? 'Finish',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withValues(alpha: 0.85),
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(color: const Color(0xFF3DDC97), width: 1.2),
                                           ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
+                                          child: Text(
+                                            widget.groupRide!.currentRide!.destinationName ?? 'Destination',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        const Icon(
+                                          Icons.location_on,
+                                          size: 26,
+                                          color: Color(0xFF3DDC97),
                                         ),
                                       ],
                                     ),

@@ -351,6 +351,21 @@ class GroupRideService {
     }
   }
 
+  /// Updates the ride's destination name and location.
+  Future<void> updateDestination({
+    required String? destinationName,
+    required LatLng? destinationLocation,
+  }) async {
+    if (_currentRide == null) return;
+    final updatedRide = _currentRide!.copyWith(
+      destinationName: destinationName,
+      destinationLocation: destinationLocation,
+    );
+    await _backend.saveRide(updatedRide);
+    _currentRide = updatedRide;
+    _rideStreamController.add(updatedRide);
+  }
+
   /// Updates current rider's status (riding, refueling, teaBreak, mechanicalIssue, crashAlert).
   ///
   /// Note: Crash alerts bypass any 3s throttling and are broadcast immediately.

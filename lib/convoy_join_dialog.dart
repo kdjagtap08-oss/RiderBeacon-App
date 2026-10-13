@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'auth_service.dart';
 import 'group_ride_service.dart';
+import 'convoy_route_service.dart';
 
 const kAccentOrange = Color(0xFFFF6B2C);
 const kCardBg = Color(0xFF181D25);
@@ -68,10 +69,9 @@ class _ConvoyJoinDialogState extends State<ConvoyJoinDialog>
       final destName = _destinationController.text.trim();
       LatLng? destLocation;
       if (destName.isNotEmpty) {
-        // Compute a destination offset ahead of start location (~2.5 km north-east)
-        destLocation = LatLng(
-          widget.currentLocation.latitude + 0.018,
-          widget.currentLocation.longitude + 0.015,
+        destLocation = await ConvoyRouteService.geocodeAddress(
+          destName,
+          nearLocation: widget.currentLocation,
         );
       }
 
@@ -220,7 +220,7 @@ class _ConvoyJoinDialogState extends State<ConvoyJoinDialog>
             ],
 
             SizedBox(
-              height: 290,
+              height: 340,
               child: TabBarView(
                 controller: _tabController,
                 children: [

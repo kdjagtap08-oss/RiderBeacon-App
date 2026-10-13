@@ -8,6 +8,52 @@ class ConvoyRouteService {
   static final Map<String, List<LatLng>> _routeCache = {};
   static final Distance _distance = const Distance();
 
+  /// Geocodes a plain-text destination query (e.g. "Railway Station", "India Gate", "Lonavala")
+  /// into an actual latitude/longitude coordinate using OpenStreetMap Nominatim.
+  /// Biases search around [nearLocation] if provided.
+  static Future<LatLng?> geocodeAddress(String query, {LatLng? nearLocation}) async {
+    final clean = query.trim();
+    if (clean.isEmpty) return null;
+
+    try {
+      String urlStr = 'https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeComponent(clean)}&limit=1';
+      if (nearLocation != null) {
+        // Add viewbox bounding box around user (~50 km) to bias search to user's city/region
+        final left = nearLocation.longitude - 0.5;
+        final right = nearLocation.longitude + 0.5;
+        final top = nearLocation.latitude + 0.5;
+        final bottom = nearLocation.latitude - 0.5;
+        urlStr += '&viewbox=$left,$top,$right,$bottom';
+      }
+
+      final response = await http.get(
+        Uri.parse(urlStr),
+        headers: {'User-Agent': 'SmartKavachRiderApp/1.0 (contact@smartkavach.app)'},
+      ).timeout(const Duration(seconds: 4));
+
+      if (response.statusCode == 200) {
+        final List results = jsonDecode(response.body);
+        if (results.isNotEmpty) {
+          final lat = double.tryParse(results[0]['lat'].toString());
+          final lon = double.tryParse(results[0]['lon'].toString());
+          if (lat != null && lon != null) {
+            return LatLng(lat, lon);
+          }
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Nominatim geocoding error: $e');
+      }
+    }
+
+    // Proximity fallback if geocoding times out or has no match
+    if (nearLocation != null) {
+      return LatLng(nearLocation.latitude + 0.015, nearLocation.longitude + 0.012);
+    }
+    return null;
+  }
+
   /// Fetches a driving route polyline between [start] and [destination] using OSRM.
   /// Falls back to a clean direct geodesic segment if network is unavailable or fails.
   static Future<List<LatLng>> fetchDrivingRoute({

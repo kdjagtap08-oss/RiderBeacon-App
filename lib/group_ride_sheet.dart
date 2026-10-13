@@ -29,6 +29,7 @@ class GroupRideSheet extends StatefulWidget {
     required this.onShareInvite,
     required this.onNavigateToMember,
     this.onLocateMemberOnMap,
+    this.onEditDestination,
     this.convoyMetricsStream,
   });
 
@@ -39,6 +40,7 @@ class GroupRideSheet extends StatefulWidget {
   final VoidCallback onShareInvite;
   final ValueChanged<RideMember> onNavigateToMember;
   final ValueChanged<RideMember>? onLocateMemberOnMap;
+  final VoidCallback? onEditDestination;
   final Stream<List<ConvoyMemberMetric>>? convoyMetricsStream;
 
   @override
@@ -138,7 +140,51 @@ class _GroupRideSheetState extends State<GroupRideSheet> {
             ),
           ),
 
-          const Divider(color: Colors.white12, height: 1),
+          // Destination Info & Edit Bar
+          if (widget.ride.destinationName != null || widget.onEditDestination != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: Colors.white.withValues(alpha: 0.04),
+              child: Row(
+                children: [
+                  const Icon(Icons.location_on, size: 16, color: Color(0xFF3DDC97)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.ride.destinationName != null && widget.ride.destinationName!.isNotEmpty
+                          ? 'Destination: ${widget.ride.destinationName}'
+                          : 'No destination set',
+                      style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (widget.onEditDestination != null)
+                    InkWell(
+                      onTap: widget.onEditDestination,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        child: Row(
+                          children: [
+                            Icon(
+                              widget.ride.destinationName != null ? Icons.edit_location_alt : Icons.add_location_alt,
+                              size: 14,
+                              color: kAccentOrange,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              widget.ride.destinationName != null ? 'Edit' : 'Set',
+                              style: const TextStyle(fontSize: 11, color: kAccentOrange, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const Divider(color: Colors.white12, height: 1),
+          ],
 
           // Quick My Status Selector Bar
           _buildMyStatusSelector(activeMetrics),
