@@ -243,6 +243,10 @@ class _ShellState extends State<Shell> {
   }
 
   void _initDeepLinks() {
+    _appLinks.getInitialLink().then((uri) {
+      if (uri != null) _handleDeepLink(uri);
+    }).catchError((_) {});
+
     _linkSub = _appLinks.uriLinkStream.listen((uri) {
       _handleDeepLink(uri);
     });
