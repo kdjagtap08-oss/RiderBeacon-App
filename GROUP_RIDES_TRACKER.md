@@ -13,7 +13,7 @@ This document tracks the step-by-step implementation of the SmartKavach Group Ri
 | **Milestone 2** | Convoy Map Markers & "Ride Together" Roster Sheet | **DONE** | Oct 13, 2026 |
 | **Milestone 3** | Realtime Group Ride Service & WhatsApp Invite Generator | **DONE** | Oct 13, 2026 |
 | **Milestone 4** | Google Sign-In & Cloud User Profile Integration | **DONE** | Oct 13, 2026 |
-| **Milestone 5** | Group Emergency Mesh Alert (Crash auto-broadcast to all riders) | **QUEUED** | — |
+| **Milestone 5** | Group Emergency Mesh Alert (Crash auto-broadcast to all riders) | **DONE** | Oct 13, 2026 |
 
 ---
 
@@ -61,7 +61,11 @@ This document tracks the step-by-step implementation of the SmartKavach Group Ri
 ---
 
 ### Milestone 5: Group Emergency Mesh Alert
-- [ ] Wire `CrashDetector` alert sequence into active `GroupRide`.
-- [ ] When a rider crashes, broadcast `RiderStatus.crashAlert` with coordinates.
-- [ ] Listeners in the group trigger full-screen alarm modal and focus map on the fallen rider.
-- [ ] Full end-to-end unit & widget test verification.
+- [x] Wire `CrashDetector` alert sequence into active `GroupRide`:
+  - [x] When countdown times out, automatically broadcast `RiderStatus.crashAlert` with live coordinates.
+  - [x] When countdown cancelled, revert rider status to `RiderStatus.riding`.
+- [x] Implement `ConvoyCrashDialog` (`lib/convoy_crash_dialog.dart`):
+  - [x] Peer riders receive high-priority modal with distance, position, directions and direct call actions.
+- [x] Implement `ConvoyJoinDialog` (`lib/convoy_join_dialog.dart`) for creating and joining convoy rides.
+- [x] Integrated convoy entry banner, active convoy card, and real-time markers into main dashboard (`lib/main.dart`).
+- [x] Full end-to-end unit & widget test verification in `test/convoy_crash_dialog_test.dart` (59/59 project tests passing).

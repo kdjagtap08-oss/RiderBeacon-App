@@ -17,6 +17,14 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'group_ride_model.dart';
+import 'group_ride_service.dart';
+import 'convoy_calculator.dart';
+import 'convoy_rider_marker.dart';
+import 'group_ride_sheet.dart';
+import 'convoy_crash_dialog.dart';
+import 'convoy_join_dialog.dart';
+import 'auth_service.dart';
 
 const kBg = Color(0xFF0E1116);
 const kCard = Color(0xFF181D25);
@@ -167,6 +175,10 @@ class _ShellState extends State<Shell> {
   final helmet = HelmetLink();
   final contacts = Contacts();
   final crashDetector = CrashDetector();
+  final authService = AuthService();
+  final groupRideService = GroupRideService();
+  StreamSubscription<List<ConvoyMemberMetric>>? _convoySub;
+  String? _lastAlertedCrashUserId;
   bool _isShowingCountdown = false;
   int tab = 0;
 
@@ -177,14 +189,23 @@ class _ShellState extends State<Shell> {
     tracker.start();
     contacts.load();
     crashDetector.startHardwareFeed();
+    authService.init();
 
     tracker.addListener(_onTrackerUpdate);
     helmet.gyro.addListener(_onGyroUpdate);
     crashDetector.addListener(_onCrashUpdate);
+
+    _convoySub = groupRideService.convoyMetricsStream.listen(_onConvoyMetricsUpdate);
   }
 
   void _onTrackerUpdate() {
     crashDetector.feedGpsSpeed(tracker.speed);
+    if (tracker.pos != null && groupRideService.currentRide != null) {
+      groupRideService.updateMyTelemetry(
+        position: tracker.pos!,
+        speedKmh: tracker.speed,
+      );
+    }
     ForegroundServiceManager.updateNotification(
         'Speed: ${tracker.speed.toStringAsFixed(1)} km/h • Helmet: ${helmet.connected ? "Connected" : "Disconnected"}');
   }
@@ -194,6 +215,30 @@ class _ShellState extends State<Shell> {
     if (v != null && v.length == 3) {
       crashDetector.feedHelmetGyro(v[0], v[1], v[2]);
     }
+  }
+
+  void _onConvoyMetricsUpdate(List<ConvoyMemberMetric> metrics) {
+    if (!mounted) return;
+    for (final m in metrics) {
+      if (m.position != RelativePosition.here &&
+          m.member.status == RiderStatus.crashAlert &&
+          _lastAlertedCrashUserId != m.member.userId) {
+        _lastAlertedCrashUserId = m.member.userId;
+        _showPeerCrashDialog(m);
+        break;
+      }
+    }
+  }
+
+  void _showPeerCrashDialog(ConvoyMemberMetric metric) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => ConvoyCrashDialog(
+        metric: metric,
+        onDismiss: () => Navigator.of(dialogContext).pop(),
+      ),
+    );
   }
 
   void _onCrashUpdate() {
@@ -244,6 +289,9 @@ class _ShellState extends State<Shell> {
         totalSeconds: 15,
         onCancel: () {
           crashDetector.acknowledge();
+          if (groupRideService.currentRide != null) {
+            groupRideService.updateMyStatus(RiderStatus.riding);
+          }
           IncidentLogService.updateLatestFeedback('Cancelled by rider');
           Navigator.of(dialogContext, rootNavigator: true).pop();
           _showFeedbackSheet();
@@ -261,6 +309,9 @@ class _ShellState extends State<Shell> {
             mlPrediction: mlLabel,
             mlConfidence: mlConf,
           ));
+          if (groupRideService.currentRide != null) {
+            groupRideService.updateMyStatus(RiderStatus.crashAlert);
+          }
           Navigator.of(dialogContext, rootNavigator: true).pop();
           sendSosAlert(
             context: context,
@@ -321,6 +372,7 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    _convoySub?.cancel();
     ForegroundServiceManager.stopService();
     tracker.removeListener(_onTrackerUpdate);
     helmet.gyro.removeListener(_onGyroUpdate);
@@ -330,6 +382,8 @@ class _ShellState extends State<Shell> {
     helmet.dispose();
     contacts.dispose();
     crashDetector.dispose();
+    groupRideService.dispose();
+    authService.dispose();
     super.dispose();
   }
 
@@ -342,6 +396,8 @@ class _ShellState extends State<Shell> {
                 h: helmet,
                 contacts: contacts,
                 crash: crashDetector,
+                auth: authService,
+                groupRide: groupRideService,
                 openHelmet: () => setState(() => tab = 1)),
             HelmetPage(h: helmet),
           ]),
@@ -426,18 +482,54 @@ Future<void> sendSosAlert({
 // ───────────────────────── Ride tab ─────────────────────────
 
 class HomePage extends StatelessWidget {
-  const HomePage(
-      {super.key,
-      required this.t,
-      required this.h,
-      required this.contacts,
-      required this.crash,
-      required this.openHelmet});
+  const HomePage({
+    super.key,
+    required this.t,
+    required this.h,
+    required this.contacts,
+    required this.crash,
+    required this.openHelmet,
+    this.auth,
+    this.groupRide,
+  });
+
   final Tracker t;
   final HelmetLink h;
   final Contacts contacts;
   final CrashDetector crash;
   final VoidCallback openHelmet;
+  final AuthService? auth;
+  final GroupRideService? groupRide;
+
+  void _openConvoyDialog(BuildContext context) {
+    if (auth == null || groupRide == null) return;
+    showDialog(
+      context: context,
+      builder: (_) => ConvoyJoinDialog(
+        authService: auth!,
+        groupRideService: groupRide!,
+        currentLocation: t.pos ?? const LatLng(19.0760, 72.8777),
+      ),
+    );
+  }
+
+  void _openGroupRideSheet(BuildContext context, GroupRide ride) {
+    if (groupRide == null) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => GroupRideSheet(
+        ride: ride,
+        metrics: groupRide!.currentMetrics,
+        currentUserId: auth?.currentUser?.id ?? groupRide!.currentUserId ?? '',
+        onStatusChanged: (status) => groupRide!.updateMyStatus(status),
+        onShareInvite: () => GroupRideService.shareInvite(ride),
+        onNavigateToMember: (member) =>
+            GroupRideService.openDirectionsTo(member.position),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -505,6 +597,101 @@ class HomePage extends StatelessWidget {
                 ),
               ),
             ]),
+            if (groupRide != null) ...[
+              const SizedBox(height: 12),
+              StreamBuilder<GroupRide?>(
+                stream: groupRide!.rideStream,
+                initialData: groupRide!.currentRide,
+                builder: (context, snapshot) {
+                  final activeRide = snapshot.data;
+                  if (activeRide == null) {
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () => _openConvoyDialog(context),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: kCard,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: kAccent.withValues(alpha: 0.3)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.groups, color: kAccent, size: 20),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Ride Together (Group Convoy)',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Track group live on map • Crash mesh alerts',
+                                    style: TextStyle(fontSize: 11, color: Colors.white54),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Icon(Icons.chevron_right, color: Colors.white38, size: 18),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => _openGroupRideSheet(context, activeRide),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF19232F),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: kGood.withValues(alpha: 0.5)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.groups, color: kGood, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  activeRide.title,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: Colors.white,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  'Code: ${activeRide.rideCode} • ${activeRide.members.length} Riders in Convoy',
+                                  style: const TextStyle(fontSize: 11, color: kGood, fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.share, color: Colors.white70, size: 16),
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => GroupRideService.shareInvite(activeRide),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
             const SizedBox(height: 16),
             Panel(
               child: Column(children: [
@@ -567,6 +754,38 @@ class HomePage extends StatelessWidget {
                               child: const Icon(Icons.navigation,
                                   color: kAccent, size: 36)),
                         ]),
+                      if (groupRide != null)
+                        StreamBuilder<List<ConvoyMemberMetric>>(
+                          stream: groupRide!.convoyMetricsStream,
+                          initialData: groupRide!.currentMetrics,
+                          builder: (context, snap) {
+                            final metrics = snap.data ?? [];
+                            final otherMembers =
+                                metrics.where((m) => m.position != RelativePosition.here);
+                            if (otherMembers.isEmpty) return const SizedBox.shrink();
+
+                            return MarkerLayer(
+                              markers: otherMembers
+                                  .map(
+                                    (m) => Marker(
+                                      point: m.member.position,
+                                      width: 90,
+                                      height: 52,
+                                      child: ConvoyRiderMarker(
+                                        metric: m,
+                                        onTap: () {
+                                          if (groupRide!.currentRide != null) {
+                                            _openGroupRideSheet(
+                                                context, groupRide!.currentRide!);
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                            );
+                          },
+                        ),
                     ],
                   ),
                 ),
