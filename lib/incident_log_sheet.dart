@@ -256,12 +256,6 @@ class _IncidentLogSheetState extends State<IncidentLogSheet> {
                 '${record.maxGyroDps.toStringAsFixed(0)}°/s',
                 Icons.rotate_right,
               ),
-              if (record.mlPrediction != null)
-                _metricChip(
-                  'ML',
-                  '${record.mlPrediction!} (${((record.mlConfidence ?? 1.0) * 100).toStringAsFixed(0)}%)',
-                  Icons.psychology_outlined,
-                ),
             ],
           ),
 
