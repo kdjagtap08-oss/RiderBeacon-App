@@ -17,6 +17,16 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'group_ride_model.dart';
+import 'group_ride_service.dart';
+import 'convoy_calculator.dart';
+import 'convoy_rider_marker.dart';
+import 'group_ride_sheet.dart';
+import 'convoy_crash_dialog.dart';
+import 'convoy_join_dialog.dart';
+import 'convoy_route_service.dart';
+import 'auth_service.dart';
+import 'package:app_links/app_links.dart';
 
 const kBg = Color(0xFF0E1116);
 const kCard = Color(0xFF181D25);
@@ -55,6 +65,7 @@ class Tracker extends ChangeNotifier {
   LatLng? pos;
   double speed = 0;
   String? error;
+  bool autoCenterOnUser = true;
 
   Future<void> start() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
@@ -77,10 +88,49 @@ class Tracker extends ChangeNotifier {
       pos = LatLng(f.latitude, f.longitude);
       speed = f.speed < 0 ? 0 : f.speed * 3.6; // m/s -> km/h
       notifyListeners();
-      try {
-        map.move(pos!, 17);
-      } catch (_) {}
+      if (autoCenterOnUser) {
+        try {
+          map.move(pos!, 17);
+        } catch (_) {}
+      }
     });
+  }
+
+  void centerOnUser({double zoom = 17}) {
+    autoCenterOnUser = true;
+    if (pos != null) {
+      try {
+        map.move(pos!, zoom);
+      } catch (_) {}
+    }
+    notifyListeners();
+  }
+
+  void moveToLocation(LatLng target, {double zoom = 17}) {
+    autoCenterOnUser = false;
+    try {
+      map.move(target, zoom);
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  void fitBounds(List<LatLng> points) {
+    if (points.isEmpty) return;
+    autoCenterOnUser = false;
+    if (points.length == 1) {
+      moveToLocation(points.first, zoom: 16);
+      return;
+    }
+    try {
+      final bounds = LatLngBounds.fromPoints(points);
+      map.fitCamera(
+        CameraFit.bounds(
+          bounds: bounds,
+          padding: const EdgeInsets.all(40),
+        ),
+      );
+    } catch (_) {}
+    notifyListeners();
   }
 
   @override
@@ -167,6 +217,12 @@ class _ShellState extends State<Shell> {
   final helmet = HelmetLink();
   final contacts = Contacts();
   final crashDetector = CrashDetector();
+  final authService = AuthService();
+  final groupRideService = GroupRideService();
+  final _appLinks = AppLinks();
+  StreamSubscription<Uri>? _linkSub;
+  StreamSubscription<List<ConvoyMemberMetric>>? _convoySub;
+  String? _lastAlertedCrashUserId;
   bool _isShowingCountdown = false;
   int tab = 0;
 
@@ -177,14 +233,76 @@ class _ShellState extends State<Shell> {
     tracker.start();
     contacts.load();
     crashDetector.startHardwareFeed();
+    authService.init();
 
     tracker.addListener(_onTrackerUpdate);
     helmet.gyro.addListener(_onGyroUpdate);
     crashDetector.addListener(_onCrashUpdate);
+
+    _convoySub = groupRideService.convoyMetricsStream.listen(_onConvoyMetricsUpdate);
+    _initDeepLinks();
+  }
+
+  void _initDeepLinks() {
+    _appLinks.getInitialLink().then((uri) {
+      if (uri != null) _handleDeepLink(uri);
+    }).catchError((_) {});
+
+    _linkSub = _appLinks.uriLinkStream.listen((uri) {
+      _handleDeepLink(uri);
+    });
+  }
+
+  Future<void> _handleDeepLink(Uri uri) async {
+    // Matches https://smartkavach.app/ride/{code} or smartkavach://ride/{code}
+    String? code;
+    if (uri.pathSegments.isNotEmpty) {
+      if (uri.pathSegments.first == 'ride' && uri.pathSegments.length >= 2) {
+        code = uri.pathSegments[1].toUpperCase();
+      } else if (uri.pathSegments.length == 1 && uri.host == 'ride') {
+        code = uri.pathSegments[0].toUpperCase();
+      }
+    }
+    if (code != null && code.length >= 4) {
+      try {
+        final user = authService.currentUser ?? await authService.init();
+        await groupRideService.joinRide(
+          rideCode: code,
+          userId: user.id,
+          displayName: user.displayName,
+          photoUrl: user.photoUrl,
+          phoneNumber: user.phoneNumber,
+          initialPosition: tracker.pos ?? const LatLng(19.0760, 72.8777),
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Joined Convoy ($code) successfully!'),
+              backgroundColor: const Color(0xFF3DDC97),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not join ride: ${e.toString().replaceAll("Exception: ", "")}'),
+              backgroundColor: const Color(0xFFE5323B),
+            ),
+          );
+        }
+      }
+    }
   }
 
   void _onTrackerUpdate() {
     crashDetector.feedGpsSpeed(tracker.speed);
+    if (tracker.pos != null && groupRideService.currentRide != null) {
+      groupRideService.updateMyTelemetry(
+        position: tracker.pos!,
+        speedKmh: tracker.speed,
+      );
+    }
     ForegroundServiceManager.updateNotification(
         'Speed: ${tracker.speed.toStringAsFixed(1)} km/h • Helmet: ${helmet.connected ? "Connected" : "Disconnected"}');
   }
@@ -194,6 +312,30 @@ class _ShellState extends State<Shell> {
     if (v != null && v.length == 3) {
       crashDetector.feedHelmetGyro(v[0], v[1], v[2]);
     }
+  }
+
+  void _onConvoyMetricsUpdate(List<ConvoyMemberMetric> metrics) {
+    if (!mounted) return;
+    for (final m in metrics) {
+      if (m.position != RelativePosition.here &&
+          m.member.status == RiderStatus.crashAlert &&
+          _lastAlertedCrashUserId != m.member.userId) {
+        _lastAlertedCrashUserId = m.member.userId;
+        _showPeerCrashDialog(m);
+        break;
+      }
+    }
+  }
+
+  void _showPeerCrashDialog(ConvoyMemberMetric metric) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => ConvoyCrashDialog(
+        metric: metric,
+        onDismiss: () => Navigator.of(dialogContext).pop(),
+      ),
+    );
   }
 
   void _onCrashUpdate() {
@@ -244,6 +386,9 @@ class _ShellState extends State<Shell> {
         totalSeconds: 15,
         onCancel: () {
           crashDetector.acknowledge();
+          if (groupRideService.currentRide != null) {
+            groupRideService.updateMyStatus(RiderStatus.riding);
+          }
           IncidentLogService.updateLatestFeedback('Cancelled by rider');
           Navigator.of(dialogContext, rootNavigator: true).pop();
           _showFeedbackSheet();
@@ -261,6 +406,9 @@ class _ShellState extends State<Shell> {
             mlPrediction: mlLabel,
             mlConfidence: mlConf,
           ));
+          if (groupRideService.currentRide != null) {
+            groupRideService.updateMyStatus(RiderStatus.crashAlert);
+          }
           Navigator.of(dialogContext, rootNavigator: true).pop();
           sendSosAlert(
             context: context,
@@ -321,6 +469,8 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    _linkSub?.cancel();
+    _convoySub?.cancel();
     ForegroundServiceManager.stopService();
     tracker.removeListener(_onTrackerUpdate);
     helmet.gyro.removeListener(_onGyroUpdate);
@@ -330,6 +480,8 @@ class _ShellState extends State<Shell> {
     helmet.dispose();
     contacts.dispose();
     crashDetector.dispose();
+    groupRideService.dispose();
+    authService.dispose();
     super.dispose();
   }
 
@@ -342,6 +494,8 @@ class _ShellState extends State<Shell> {
                 h: helmet,
                 contacts: contacts,
                 crash: crashDetector,
+                auth: authService,
+                groupRide: groupRideService,
                 openHelmet: () => setState(() => tab = 1)),
             HelmetPage(h: helmet),
           ]),
@@ -425,23 +579,309 @@ Future<void> sendSosAlert({
 
 // ───────────────────────── Ride tab ─────────────────────────
 
-class HomePage extends StatelessWidget {
-  const HomePage(
-      {super.key,
-      required this.t,
-      required this.h,
-      required this.contacts,
-      required this.crash,
-      required this.openHelmet});
+// ───────────────────────── Ride tab ─────────────────────────
+
+class HomePage extends StatefulWidget {
+  const HomePage({
+    super.key,
+    required this.t,
+    required this.h,
+    required this.contacts,
+    required this.crash,
+    required this.openHelmet,
+    this.auth,
+    this.groupRide,
+  });
+
   final Tracker t;
   final HelmetLink h;
   final Contacts contacts;
   final CrashDetector crash;
   final VoidCallback openHelmet;
+  final AuthService? auth;
+  final GroupRideService? groupRide;
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([t, h, contacts]),
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  final Map<String, List<LatLng>> _memberRoutes = {};
+  final Map<String, LatLng> _memberRouteStartPos = {};
+  final Set<String> _offTrackMembers = {};
+  final Set<String> _inFlightRouteRequests = {};
+  String? _lastRouteRideCode;
+  LatLng? _lastDestinationLocation;
+  StreamSubscription<GroupRide?>? _rideSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _rideSub = widget.groupRide?.rideStream.listen((_) {
+      if (mounted) {
+        _checkAndFetchRoutes();
+        setState(() {});
+      }
+    });
+    _checkAndFetchRoutes();
+  }
+
+  @override
+  void didUpdateWidget(covariant HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.groupRide != widget.groupRide) {
+      _rideSub?.cancel();
+      _rideSub = widget.groupRide?.rideStream.listen((_) {
+        if (mounted) {
+          _checkAndFetchRoutes();
+          setState(() {});
+        }
+      });
+      _checkAndFetchRoutes();
+    }
+  }
+
+  @override
+  void dispose() {
+    _rideSub?.cancel();
+    super.dispose();
+  }
+
+  void _checkAndFetchRoutes() {
+    final ride = widget.groupRide?.currentRide;
+    if (ride == null || ride.destinationLocation == null) {
+      if (_memberRoutes.isNotEmpty || _lastDestinationLocation != null) {
+        _memberRoutes.clear();
+        _memberRouteStartPos.clear();
+        _offTrackMembers.clear();
+        _inFlightRouteRequests.clear();
+        _lastDestinationLocation = null;
+        _lastRouteRideCode = null;
+      }
+      return;
+    }
+
+    final dest = ride.destinationLocation!;
+    final rideCode = ride.rideCode;
+    final destChanged = _lastDestinationLocation == null ||
+        _lastDestinationLocation!.latitude != dest.latitude ||
+        _lastDestinationLocation!.longitude != dest.longitude ||
+        _lastRouteRideCode != rideCode;
+
+    if (destChanged) {
+      _memberRoutes.clear();
+      _memberRouteStartPos.clear();
+      _offTrackMembers.clear();
+      _inFlightRouteRequests.clear();
+      _lastDestinationLocation = dest;
+      _lastRouteRideCode = rideCode;
+    }
+
+    final myId = widget.auth?.currentUser?.id ?? widget.groupRide?.currentUserId;
+
+    // Fetch route for each member
+    for (final member in ride.members.values) {
+      final key = member.userId;
+      final isMe = key == myId;
+      final startPos = (isMe && widget.t.pos != null) ? widget.t.pos! : member.position;
+
+      final lastStart = _memberRouteStartPos[key];
+      final needsRecalculation = !_memberRoutes.containsKey(key) ||
+          destChanged ||
+          (lastStart != null && ConvoyCalculator.distanceBetween(lastStart, startPos) > 250.0);
+
+      if (needsRecalculation && !_inFlightRouteRequests.contains(key)) {
+        _inFlightRouteRequests.add(key);
+        _memberRouteStartPos[key] = startPos;
+        ConvoyRouteService.fetchDrivingRoute(
+          start: startPos,
+          destination: dest,
+        ).then((points) {
+          _inFlightRouteRequests.remove(key);
+          if (mounted) {
+            setState(() {
+              _memberRoutes[key] = points;
+              _evaluateOffTrack(key, startPos, points);
+            });
+          }
+        }).catchError((_) {
+          _inFlightRouteRequests.remove(key);
+        });
+      } else if (_memberRoutes.containsKey(key)) {
+        // Re-evaluate off-track with current position
+        final points = _memberRoutes[key]!;
+        _evaluateOffTrack(key, startPos, points);
+      }
+    }
+  }
+
+  void _evaluateOffTrack(String userId, LatLng position, List<LatLng> routePoints) {
+    final offTrack = ConvoyRouteService.isRiderOffTrack(
+      position: position,
+      routePoints: routePoints,
+      thresholdMeters: 120.0,
+    );
+    if (offTrack && !_offTrackMembers.contains(userId)) {
+      _offTrackMembers.add(userId);
+    } else if (!offTrack && _offTrackMembers.contains(userId)) {
+      _offTrackMembers.remove(userId);
+    }
+  }
+
+  Future<void> _openConvoyDialog(BuildContext context) async {
+    if (widget.auth == null || widget.groupRide == null) return;
+    final joined = await showDialog<bool>(
+      context: context,
+      builder: (_) => ConvoyJoinDialog(
+        authService: widget.auth!,
+        groupRideService: widget.groupRide!,
+        currentLocation: widget.t.pos ?? const LatLng(19.0760, 72.8777),
+      ),
+    );
+
+    if (joined == true && mounted) {
+      setState(() {
+        _lastDestinationLocation = null;
+        _memberRoutes.clear();
+        _memberRouteStartPos.clear();
+        _inFlightRouteRequests.clear();
+      });
+      _checkAndFetchRoutes();
+    }
+  }
+
+  void _openGroupRideSheet(BuildContext context, GroupRide ride) {
+    if (widget.groupRide == null) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => GroupRideSheet(
+        ride: ride,
+        metrics: widget.groupRide!.currentMetrics,
+        convoyMetricsStream: widget.groupRide!.convoyMetricsStream,
+        currentUserId: widget.auth?.currentUser?.id ?? widget.groupRide!.currentUserId ?? '',
+        onStatusChanged: (status) => widget.groupRide!.updateMyStatus(status),
+        onShareInvite: () => GroupRideService.shareInvite(ride),
+        onNavigateToMember: (member) =>
+            GroupRideService.openDirectionsTo(member.position),
+        onLocateMemberOnMap: (member) {
+          Navigator.of(context).pop();
+          widget.t.moveToLocation(member.position, zoom: 16);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Focused on ${member.displayName} on map'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        },
+        onEditDestination: () {
+          Navigator.of(context).pop();
+          _showEditDestinationDialog(ride);
+        },
+      ),
+    );
+  }
+
+  void _showEditDestinationDialog(GroupRide ride) {
+    final controller = TextEditingController(text: ride.destinationName ?? '');
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF181D25),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.edit_location_alt, color: Color(0xFFFF6B2C), size: 22),
+            SizedBox(width: 8),
+            Text('Set Convoy Destination', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                style: const TextStyle(fontSize: 14, color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'e.g. Pune Railway Station / Lonavala',
+                  hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+                  filled: true,
+                  fillColor: Colors.white.withValues(alpha: 0.05),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B2C),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              final newName = controller.text.trim();
+              Navigator.of(dialogCtx).pop();
+              if (newName.isEmpty) {
+                await widget.groupRide?.updateDestination(
+                  destinationName: null,
+                  destinationLocation: null,
+                );
+                if (mounted) {
+                  setState(() {
+                    _memberRoutes.clear();
+                    _memberRouteStartPos.clear();
+                    _offTrackMembers.clear();
+                    _lastDestinationLocation = null;
+                  });
+                }
+              } else {
+                final loc = await ConvoyRouteService.geocodeAddress(
+                  newName,
+                  nearLocation: widget.t.pos,
+                );
+                await widget.groupRide?.updateDestination(
+                  destinationName: newName,
+                  destinationLocation: loc,
+                );
+                if (mounted) {
+                  setState(() {
+                    _lastDestinationLocation = null; // Forces immediate route re-calculation
+                  });
+                }
+                _checkAndFetchRoutes();
+              }
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(newName.isEmpty ? 'Destination cleared' : 'Destination updated to $newName'),
+                    backgroundColor: const Color(0xFF3DDC97),
+                  ),
+                );
+              }
+            },
+            child: const Text('Save Destination', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _checkAndFetchRoutes();
+    return ListenableBuilder(
+        listenable: Listenable.merge([widget.t, widget.h, widget.contacts]),
         builder: (context, _) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -472,7 +912,7 @@ class HomePage extends StatelessWidget {
             Row(children: [
               InkWell(
                 borderRadius: BorderRadius.circular(20),
-                onTap: openHelmet,
+                onTap: widget.openHelmet,
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -480,9 +920,9 @@ class HomePage extends StatelessWidget {
                       color: kCard, borderRadius: BorderRadius.circular(20)),
                   child: Row(children: [
                     Icon(Icons.circle,
-                        size: 10, color: h.connected ? kGood : Colors.white38),
+                        size: 10, color: widget.h.connected ? kGood : Colors.white38),
                     const SizedBox(width: 8),
-                    Text(h.connected ? 'Helmet connected' : 'Connect helmet',
+                    Text(widget.h.connected ? 'Helmet connected' : 'Connect helmet',
                         style: const TextStyle(fontSize: 13)),
                   ]),
                 ),
@@ -491,7 +931,7 @@ class HomePage extends StatelessWidget {
               InkWell(
                 borderRadius: BorderRadius.circular(20),
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => SosSettingsPage(contacts: contacts))),
+                    builder: (_) => SosSettingsPage(contacts: widget.contacts))),
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -505,6 +945,103 @@ class HomePage extends StatelessWidget {
                 ),
               ),
             ]),
+            if (widget.groupRide != null) ...[
+              const SizedBox(height: 12),
+              StreamBuilder<GroupRide?>(
+                stream: widget.groupRide!.rideStream,
+                initialData: widget.groupRide!.currentRide,
+                builder: (context, snapshot) {
+                  final activeRide = snapshot.data;
+                  if (activeRide == null) {
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () => _openConvoyDialog(context),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: kCard,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: kAccent.withValues(alpha: 0.3)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.groups, color: kAccent, size: 20),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Ride Together (Group Convoy)',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Track group live on map • Crash mesh alerts',
+                                    style: TextStyle(fontSize: 11, color: Colors.white54),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Icon(Icons.chevron_right, color: Colors.white38, size: 18),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => _openGroupRideSheet(context, activeRide),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF19232F),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: kGood.withValues(alpha: 0.5)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.groups, color: kGood, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  activeRide.title,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: Colors.white,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  'Code: ${activeRide.rideCode} • ${activeRide.members.length} Riders in Convoy${activeRide.destinationName != null ? " • To: ${activeRide.destinationName}" : ""}',
+                                  style: const TextStyle(fontSize: 11, color: kGood, fontWeight: FontWeight.w600),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.share, color: Colors.white70, size: 16),
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => GroupRideService.shareInvite(activeRide),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
             const SizedBox(height: 16),
             Panel(
               child: Column(children: [
@@ -514,7 +1051,7 @@ class HomePage extends StatelessWidget {
                   child: Stack(alignment: Alignment.center, children: [
                     SizedBox.expand(
                       child: CircularProgressIndicator(
-                        value: (t.speed / 120).clamp(0.0, 1.0),
+                        value: (widget.t.speed / 120).clamp(0.0, 1.0),
                         strokeWidth: 14,
                         strokeCap: StrokeCap.round,
                         backgroundColor: Colors.white10,
@@ -522,7 +1059,7 @@ class HomePage extends StatelessWidget {
                       ),
                     ),
                     Column(mainAxisSize: MainAxisSize.min, children: [
-                      Text(t.speed.toStringAsFixed(0),
+                      Text(widget.t.speed.toStringAsFixed(0),
                           style: const TextStyle(
                               fontSize: 68, fontWeight: FontWeight.w800)),
                       const Text('km/h',
@@ -532,10 +1069,10 @@ class HomePage extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  t.error ??
-                      (t.pos == null
+                  widget.t.error ??
+                      (widget.t.pos == null
                           ? 'Waiting for GPS...'
-                          : '${t.pos!.latitude.toStringAsFixed(5)}, ${t.pos!.longitude.toStringAsFixed(5)}'),
+                          : '${widget.t.pos!.latitude.toStringAsFixed(5)}, ${widget.t.pos!.longitude.toStringAsFixed(5)}'),
                   style: const TextStyle(color: Colors.white54, fontSize: 13),
                 ),
               ]),
@@ -546,42 +1083,322 @@ class HomePage extends StatelessWidget {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(20),
                 child: SizedBox(
-                  height: 200,
-                  child: FlutterMap(
-                    mapController: t.map,
-                    options: const MapOptions(
-                        initialCenter: LatLng(20.5937, 78.9629),
-                        initialZoom: 4),
+                  height: 230,
+                  child: Stack(
                     children: [
-                      TileLayer(
-                        urlTemplate:
-                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'com.example.smartkavach',
+                      FlutterMap(
+                        mapController: widget.t.map,
+                        options: MapOptions(
+                          initialCenter: widget.t.pos ?? const LatLng(20.5937, 78.9629),
+                          initialZoom: widget.t.pos != null ? 17 : 4,
+                          onPositionChanged: (camera, hasGesture) {
+                            if (hasGesture && widget.t.autoCenterOnUser) {
+                              widget.t.autoCenterOnUser = false;
+                            }
+                          },
+                        ),
+                        children: [
+                          TileLayer(
+                            urlTemplate:
+                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            userAgentPackageName: 'com.example.smartkavach',
+                          ),
+
+                          // Planned Driving Route Polylines to Destination
+                          if (_memberRoutes.isNotEmpty)
+                            PolylineLayer(
+                              polylines: _memberRoutes.entries.map((entry) {
+                                final isMe = entry.key == (widget.auth?.currentUser?.id ?? widget.groupRide?.currentUserId);
+                                final isOffTrack = _offTrackMembers.contains(entry.key);
+                                final color = isOffTrack
+                                    ? const Color(0xFFFF4757).withValues(alpha: 0.85)
+                                    : isMe
+                                        ? const Color(0xFF2979FF).withValues(alpha: 0.9)
+                                        : const Color(0xFF00D2D3).withValues(alpha: 0.65);
+
+                                final points = List<LatLng>.from(entry.value);
+                                if (isMe && widget.t.pos != null && points.isNotEmpty) {
+                                  points[0] = widget.t.pos!;
+                                }
+                                final destLoc = widget.groupRide?.currentRide?.destinationLocation;
+                                if (destLoc != null && points.isNotEmpty) {
+                                  points[points.length - 1] = destLoc;
+                                }
+
+                                return Polyline(
+                                  points: points,
+                                  strokeWidth: isMe ? 5.0 : 3.5,
+                                  color: color,
+                                );
+                              }).toList(),
+                            ),
+
+                          // Final Destination Pin (Sleek red map pin style with label pill)
+                          if (widget.groupRide?.currentRide?.destinationLocation != null)
+                            MarkerLayer(
+                              markers: [
+                                Marker(
+                                  point: widget.groupRide!.currentRide!.destinationLocation!,
+                                  width: 140,
+                                  height: 60,
+                                  alignment: Alignment.center,
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    alignment: Alignment.center,
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Container(
+                                          constraints: const BoxConstraints(maxWidth: 120),
+                                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFE5323B),
+                                            borderRadius: BorderRadius.circular(10),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withValues(alpha: 0.4),
+                                                blurRadius: 4,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(Icons.flag_rounded, size: 11, color: Colors.white),
+                                              const SizedBox(width: 4),
+                                              Flexible(
+                                                child: Text(
+                                                  widget.groupRide!.currentRide!.destinationName ?? 'Destination',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        const Icon(
+                                          Icons.location_on,
+                                          size: 28,
+                                          color: Color(0xFFE5323B),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                          if (widget.t.pos != null)
+                            MarkerLayer(markers: [
+                              Marker(
+                                point: widget.t.pos!,
+                                width: 40,
+                                height: 40,
+                                child: const Icon(Icons.navigation,
+                                    color: kAccent, size: 36),
+                              ),
+                            ]),
+                          if (widget.groupRide != null)
+                            StreamBuilder<List<ConvoyMemberMetric>>(
+                              stream: widget.groupRide!.convoyMetricsStream,
+                              initialData: widget.groupRide!.currentMetrics,
+                              builder: (context, snap) {
+                                final metrics = snap.data ?? [];
+                                final otherMembers =
+                                    metrics.where((m) => m.position != RelativePosition.here);
+                                if (otherMembers.isEmpty) return const SizedBox.shrink();
+
+                                return MarkerLayer(
+                                  markers: otherMembers
+                                      .map(
+                                        (m) => Marker(
+                                          point: m.member.position,
+                                          width: 130,
+                                          height: 75,
+                                          alignment: Alignment.center,
+                                          child: FittedBox(
+                                            fit: BoxFit.scaleDown,
+                                            alignment: Alignment.center,
+                                            child: ConvoyRiderMarker(
+                                              metric: m,
+                                              isOffTrack: _offTrackMembers.contains(m.member.userId),
+                                              onTap: () {
+                                                if (widget.groupRide!.currentRide != null) {
+                                                  _openGroupRideSheet(
+                                                      context, widget.groupRide!.currentRide!);
+                                                }
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                );
+                              },
+                            ),
+                        ],
                       ),
-                      if (t.pos != null)
-                        MarkerLayer(markers: [
-                          Marker(
-                              point: t.pos!,
-                              width: 40,
-                              height: 40,
-                              child: const Icon(Icons.navigation,
-                                  color: kAccent, size: 36)),
-                        ]),
+
+                      // Off-screen Convoy Indicator / HUD overlay
+                      if (widget.groupRide != null)
+                        StreamBuilder<List<ConvoyMemberMetric>>(
+                          stream: widget.groupRide!.convoyMetricsStream,
+                          initialData: widget.groupRide!.currentMetrics,
+                          builder: (context, snap) {
+                            final metrics = snap.data ?? [];
+                            final other = metrics.where((m) => m.position != RelativePosition.here).toList();
+                            if (other.isEmpty) return const SizedBox.shrink();
+
+                            final ahead = other.where((m) => m.position == RelativePosition.ahead).toList();
+                            final behind = other.where((m) => m.position == RelativePosition.behind).toList();
+
+                            return Positioned(
+                              top: 8,
+                              left: 10,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black87,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.white24, width: 0.8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (ahead.isNotEmpty) ...[
+                                      const Icon(Icons.arrow_upward, size: 12, color: Color(0xFF3DDC97)),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        '${ahead.length} Ahead (${ahead.first.formattedDistance})',
+                                        style: const TextStyle(fontSize: 10, color: Color(0xFF3DDC97), fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                    if (ahead.isNotEmpty && behind.isNotEmpty)
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 5),
+                                        child: Text('•', style: TextStyle(color: Colors.white38, fontSize: 10)),
+                                      ),
+                                    if (behind.isNotEmpty) ...[
+                                      const Icon(Icons.arrow_downward, size: 12, color: Color(0xFFFF6B2C)),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        '${behind.length} Behind (${behind.first.formattedDistance})',
+                                        style: const TextStyle(fontSize: 10, color: Color(0xFFFF6B2C), fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+
+                      // Floating Map Action Controls (Fit All Convoy / Recenter Me)
+                      Positioned(
+                        bottom: 8,
+                        right: 8,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (widget.groupRide != null && widget.groupRide!.currentRide != null)
+                              GestureDetector(
+                                onTap: () {
+                                  final allPoints = <LatLng>[];
+                                  if (widget.t.pos != null) allPoints.add(widget.t.pos!);
+                                  for (final m in widget.groupRide!.currentMetrics) {
+                                    allPoints.add(m.member.position);
+                                  }
+                                  if (widget.groupRide!.currentRide!.destinationLocation != null) {
+                                    allPoints.add(widget.groupRide!.currentRide!.destinationLocation!);
+                                  }
+                                  widget.t.fitBounds(allPoints);
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1E2530),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: Colors.white24),
+                                  ),
+                                  child: const Row(
+                                    children: [
+                                      Icon(Icons.zoom_out_map, size: 13, color: Colors.white),
+                                      SizedBox(width: 4),
+                                      Text('Fit Convoy', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            GestureDetector(
+                              onTap: () => widget.t.centerOnUser(zoom: 17),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: widget.t.autoCenterOnUser ? const Color(0xFF3DDC97) : const Color(0xFF1E2530),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: Colors.white24),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.my_location,
+                                      size: 13,
+                                      color: widget.t.autoCenterOnUser ? Colors.black : Colors.white,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Recenter',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: widget.t.autoCenterOnUser ? Colors.black : Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ),
             ),
                 const SizedBox(height: 16),
-                GyroPanel(g: h.gyro),
+                GyroPanel(g: widget.h.gyro),
                 const SizedBox(height: 16),
-                SimulationPanel(detector: crash),
+                SimulationPanel(detector: widget.crash),
+                if (widget.groupRide != null && widget.groupRide!.currentRide != null) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFE5323B),
+                      side: const BorderSide(color: Color(0xFFE5323B)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.warning_amber_rounded, size: 18),
+                    label: const Text('Simulate Bot Crash (Vikram) • Test Alert Popup'),
+                    onPressed: () {
+                      widget.groupRide!.simulateBotCrash();
+                    },
+                  ),
+                ],
                 const SizedBox(height: 20),
             GestureDetector(
               onLongPress: () => sendSosAlert(
                 context: context,
-                tracker: t,
-                contacts: contacts,
+                tracker: widget.t,
+                contacts: widget.contacts,
               ),
               child: Container(
                 height: 76,
@@ -607,6 +1424,7 @@ class HomePage extends StatelessWidget {
           ],
         ),
       );
+  }
 }
 
 // ───────────────────────── Helmet tab ─────────────────────────
